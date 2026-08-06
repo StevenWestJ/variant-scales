@@ -139,6 +139,19 @@ shows live progress from Tesseract's `logger` callback and has a Cancel button a
 second line of defense, so the user is never truly stuck regardless of what the
 timeout does or doesn't catch.
 
+**`recognize()` takes the raw `File`/`Blob`, not an `ImageBitmap` — confirmed the hard
+way (2026-08-07, pc-v13 → pc-v14).** The photo capture path used to call
+`createImageBitmap(file)` first (a leftover from the `TextDetector` days, which
+specifically wanted a `CanvasImageSource`). Tesseract.js's documented `recognize()`
+input types are: a base64 data URL string, `Buffer`, and — browser-only — `File`/
+`Blob` or an `img`/`canvas` element. `ImageBitmap` is not among them. Passing one
+anyway didn't throw immediately; it got as far as Tesseract's internal image-format
+handling (which branches on the byte content to detect BMP vs. other formats) before
+failing deep inside with `Error: Error attempting to read image.` — a generic wrapper
+around the WASM engine's `SetImageFile` call returning failure, not a message that
+points at the actual mismatch. Fixed by dropping `createImageBitmap` entirely and
+passing `file` straight to `worker.recognize()`.
+
 **First real-device test (2026-08-06, pc-v11) failed** with only a generic "couldn't
 read that image" message — not diagnosable from that alone. Checked the two most
 likely self-hosting gotchas directly against the live site (`curl -I` against each

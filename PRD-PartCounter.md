@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.10 — built, awaiting shop-floor test
+**Status:** v0.11 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,14 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.11 (2026-08-07)** — Second OCR fix, again located precisely by the v0.9 error
+  panel: the photo was being converted to an `ImageBitmap` before being handed to
+  Tesseract, which doesn't accept that type (`File`/`Blob`, `img`/`canvas`, data URL
+  or `Buffer` only) and failed deep inside its image reader with an unhelpful generic
+  message. The conversion was a leftover from the `TextDetector` implementation.
+  Dropped it; the raw `File` goes straight to `recognize()` now. Build bumped to
+  `pc-v14`.
 
 - **v0.10 (2026-08-07)** — Found the actual cause of the OCR failure, thanks to the
   detailed error panel added in v0.9: the wrong core-engine file variant was shipped.

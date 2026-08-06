@@ -13,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v13";
+const BUILD = "pc-v14";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -558,10 +558,8 @@ export default function PartCounter() {
     setOcrProgress({ status: "starting up", pct: 0 });
     setOcrError(null);
     let worker = null;
-    let step = "decoding the photo";
+    let step = "loading the OCR engine";
     try {
-      const bmp = await createImageBitmap(file);
-      step = "loading the OCR engine";
       worker = await withTimeout(
         createWorker("eng", 1, {
           // Root-absolute, not relative: the doc doesn't say whether these
@@ -587,7 +585,7 @@ export default function PartCounter() {
       );
       if (ocrCancelledRef.current) return;
       step = "recognizing text";
-      const { data } = await withTimeout(worker.recognize(bmp), 20000);
+      const { data } = await withTimeout(worker.recognize(file), 20000);
       if (ocrCancelledRef.current) return;
       const lines = (data.text || "")
         .split("\n")
