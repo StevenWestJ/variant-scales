@@ -12,7 +12,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v9";
+const BUILD = "pc-v10";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -45,6 +45,15 @@ const fmt = (n, d = 1) =>
   isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+// Shape Detection calls (TextDetector, BarcodeDetector) can hang on real
+// Android hardware instead of resolving or rejecting - confirmed on device.
+// Never await one without a timeout, or the caller stalls forever.
+const withTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
 
 function accuracy(count, netG, gPerPiece, sampleWeightG, res, usedTare) {
   if (!isFinite(netG) || netG <= 0 || !gPerPiece) return null;
@@ -437,6 +446,7 @@ export default function PartCounter() {
   const [labelLines, setLabelLines] = useState([]);
   const [nameOptions, setNameOptions] = useState([]);
   const fileRef = useRef(null);
+  const ocrCancelledRef = useRef(false);
 
   useEffect(() => { loadData().then(setData); }, []);
 
@@ -540,16 +550,23 @@ export default function PartCounter() {
 
   // On-device text detection only. No key, no network, no cost. If the
   // browser lacks TextDetector, the user types the name — never blocked.
+  const cancelOcr = () => {
+    ocrCancelledRef.current = true;
+    setOcrBusy(false);
+  };
+
   const readLabel = async (file) => {
     if (!file) return;
     if (!("TextDetector" in window)) {
       flash("This browser can't read text on-device. Scan the barcode or type the code.");
       return;
     }
+    ocrCancelledRef.current = false;
     setOcrBusy(true);
     try {
       const bmp = await createImageBitmap(file);
-      const blocks = await new window.TextDetector().detect(bmp);
+      const blocks = await withTimeout(new window.TextDetector().detect(bmp), 8000);
+      if (ocrCancelledRef.current) return;
       const lines = blocks
         .map((b) => String(b.rawValue || "").trim())
         .filter((t) => t.length > 1 && t.length < 60)
@@ -562,9 +579,13 @@ export default function PartCounter() {
       }
       flash("No text found on that photo. Try again closer.");
     } catch (e) {
-      flash("Couldn't read that image. Try again, or type the code.");
+      if (!ocrCancelledRef.current) {
+        flash(e && e.message === "timeout"
+          ? "That took too long. Try again, or type the name."
+          : "Couldn't read that image. Try again, or type the code.");
+      }
     } finally {
-      setOcrBusy(false);
+      if (!ocrCancelledRef.current) setOcrBusy(false);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -1232,6 +1253,7 @@ export default function PartCounter() {
         <div className="fixed inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center gap-4">
           <Loader size={36} className="text-amber-400 animate-spin" />
           <div className="text-sm text-slate-400 tracking-wide">Reading the label…</div>
+          <Btn onClick={cancelOcr} className="mt-2">Cancel</Btn>
         </div>
       )}
 

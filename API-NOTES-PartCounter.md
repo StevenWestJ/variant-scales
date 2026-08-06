@@ -51,6 +51,12 @@ Never let it — or any other on-device Shape Detection call — sit between "co
 and showing the user the accept/Import screen. Run it after, fire-and-forget, patching
 the result in if it ever comes back.
 
+Every direct `await` on a Shape Detection call (the standalone "Photograph the label"
+path, not just the scanner) goes through `withTimeout(promise, 8000)` for the same
+reason — an 8s cap, then fail soft. The `ocrBusy` full-screen loader also has a Cancel
+button as a second line of defense, so the user is never truly stuck regardless of
+what the timeout does or doesn't catch.
+
 ## Artifact storage API (artifact-era, historical)
 
 Superseded by plain `localStorage` under the key `stocktake-v1` once the app left the

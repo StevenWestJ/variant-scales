@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.6 — built, awaiting shop-floor test
+**Status:** v0.7 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,12 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.7 (2026-08-06)** — Barcode scan → confirm → import confirmed working end to end
+  on device. Pre-emptively guarded the standalone "Photograph the label" text-read path
+  with the same fix the scanner needed: an 8s timeout on `TextDetector.detect()` plus a
+  Cancel button on the loading screen, since it had the identical hang risk. Build
+  bumped to `pc-v10`.
 
 - **v0.6 (2026-08-06)** — Fixed the Import panel being pushed off-screen after lock:
   the video's `flex-1` container had no `min-height` override, and on-device the
