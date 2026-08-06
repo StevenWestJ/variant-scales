@@ -53,7 +53,7 @@ It runs on **one Android phone**, hosted on Netlify, installed as a PWA.
 | lucide-react | 0.383.0 | Icons |
 | Tailwind | 3.4.19 | Compiled here, so arbitrary values (`text-[11px]`) work |
 | esbuild | 0.28.1 | Bundler |
-| tesseract.js | 7.0.0 | On-device OCR for label reading. Self-hosted — see API-NOTES for the `public/tesseract/` asset layout, don't point it at a CDN |
+| tesseract.js | 7.0.0 | On-device OCR for label reading. Self-hosted — see API-NOTES for the `public/tesseract/` asset layout, don't point it at a CDN. Runs `dan+eng`: **the labels are Danish**, and English-only returned confident nonsense |
 
 ## Build and deploy
 
@@ -119,6 +119,12 @@ The box is red when nothing is in view, amber when it can see a code but won't t
 is deliberate — it means nothing is being considered.
 
 Don't "simplify" any of this away. Each step is a bug that was reported from the floor.
+
+**The label reader now works the same way, and for the same reason.** OCR over a whole
+photo of a workbench returned nonsense, exactly as the barcode decoder did before it
+started rejecting anything outside the guide box. The user drags a box round the text
+and nothing outside it is read. When something on-device is guessing badly, narrowing
+what it's allowed to look at has beaten trying to make it smarter, twice now.
 
 **2026-08-06 bug (fixed):** the capture-on-lock code declared `vid`/`cv` with `const`
 inside a `try` block, then referenced them again after the block closed — a

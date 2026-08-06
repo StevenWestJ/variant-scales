@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.11 — built, awaiting shop-floor test
+**Status:** v0.12 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -84,6 +84,11 @@ calibration sample.
 - **No NAV export available.** The library is built up during the count. Each part is
   named once; every scan after that is a lookup.
 
+- **Bin labels are printed in Danish**, with some English and abbreviations mixed into
+  the descriptions (`Blindnitte – AL/ST – 6,4 x 30 mm`). The label reader loads Danish
+  and English together for this reason. Worth remembering for anything else that has
+  to parse or match on label text.
+
 ## 9. Open questions
 
 1. **Multiple counters** — will anyone else count in parallel? If yes, v0.3 needs a
@@ -104,6 +109,15 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.12 (2026-08-07)** — OCR ran but returned text unrelated to the label. Three
+  compounding causes, all fixed: it was reading Danish labels with an English-only
+  model (now `dan+eng`); it was analysing the whole photo including the workbench
+  around the label (the user now crops to the text, and page segmentation is set to
+  single-block instead of full page layout); and the raw photo went in unprocessed
+  (now cropped, scaled, greyscaled and contrast-stretched first). Build bumped to
+  `pc-v15`. If accuracy is still short, the next lever is the `best` trained models
+  instead of `fast` — ~19MB more download and 3–5× slower per read.
 
 - **v0.11 (2026-08-07)** — Second OCR fix, again located precisely by the v0.9 error
   panel: the photo was being converted to an `ImageBitmap` before being handed to

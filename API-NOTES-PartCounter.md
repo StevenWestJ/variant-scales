@@ -139,6 +139,43 @@ shows live progress from Tesseract's `logger` callback and has a Cancel button a
 second line of defense, so the user is never truly stuck regardless of what the
 timeout does or doesn't catch.
 
+### Accuracy: what actually mattered (2026-08-07, pc-v15)
+
+First working read (pc-v14) returned text bearing no relation to the label — wrong even
+on a word photographed close up. Three compounding causes, none of them the OCR engine
+being bad:
+
+1. **Language.** The labels are Danish (`Blindnitte – AL/ST – 6,4 x 30 mm`) and it was
+   running `eng` only. Tesseract's LSTM doesn't just match glyph shapes — it scores
+   candidates against a language model, so Danish words judged against English
+   vocabulary come back as confident, wrong English. Now `"dan+eng"` (the `langs`
+   argument accepts `+`-joined codes; `createWorker` splits on it). Both are
+   `tessdata_fast`, +1.2MB gz for Danish. This alone probably explains the
+   photographed-close-up word still being wrong.
+2. **The photo is mostly not label.** A bin label photographed on a workbench is
+   surrounded by desk, tools, other boxes. Default PSM (`AUTO`, 3) tries to find
+   columns and reading order across that whole scene. Fixed two ways: the user now
+   crops to the text (see below), and the mode is `PSM.SINGLE_BLOCK` (6) — one block
+   of text, no page layout analysis. Set via `worker.setParameters()` after creation.
+3. **No preprocessing.** Full-resolution phone photo of a glossy laminated label:
+   low contrast, glare, far more pixels than Tesseract wants. `preprocess()` in
+   `src/app.jsx` crops, scales the long edge into 900–1800px (upscaling tight crops,
+   downscaling huge ones), converts to greyscale and stretches the contrast to the
+   full 0–255 range.
+
+**The crop step is the same discipline as the scanner's guide box.** `LabelCropper`
+shows the photo and the user drags a box round the text; nothing outside it is ever
+read. This mirrors the barcode rule in `CLAUDE.md` — reject anything outside the box —
+and for the same reason: constraining what the machine is allowed to consider beats
+asking it to figure out what matters. `recognize()` gets the cropped canvas (canvas is
+a documented-supported input type).
+
+If accuracy still isn't good enough, the next lever is `tessdata_best` instead of
+`tessdata_fast` — measured 2026-08-07: `best` eng 15.4MB raw / 12MB gz, dan 9.8MB /
+7MB gz, versus `fast` at 4.1MB/2MB and 2.6MB/1.2MB. Materially more accurate,
+3–5× slower per read on a phone, ~19MB gz of extra one-time download. Deliberately
+not taken yet — try the cheap fixes above first.
+
 **`recognize()` takes the raw `File`/`Blob`, not an `ImageBitmap` — confirmed the hard
 way (2026-08-07, pc-v13 → pc-v14).** The photo capture path used to call
 `createImageBitmap(file)` first (a leftover from the `TextDetector` days, which
@@ -150,7 +187,9 @@ handling (which branches on the byte content to detect BMP vs. other formats) be
 failing deep inside with `Error: Error attempting to read image.` — a generic wrapper
 around the WASM engine's `SetImageFile` call returning failure, not a message that
 points at the actual mismatch. Fixed by dropping `createImageBitmap` entirely and
-passing `file` straight to `worker.recognize()`.
+passing `file` straight to `worker.recognize()`. (As of pc-v15 it's handed a `canvas`
+instead — also on the supported list — because the photo is now cropped and
+preprocessed first. The point stands: check that list before passing anything else.)
 
 **First real-device test (2026-08-06, pc-v11) failed** with only a generic "couldn't
 read that image" message — not diagnosable from that alone. Checked the two most

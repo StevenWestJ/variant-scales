@@ -4,7 +4,7 @@ import {
   Download, Settings, AlertTriangle, Package, Search, RotateCcw,
   ClipboardList, Pencil, Boxes, Image as ImageIcon, Loader, Zap
 } from "lucide-react";
-import { createWorker } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 
 /* ------------------------------------------------------------------ */
 /*  Storage                                                            */
@@ -13,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v14";
+const BUILD = "pc-v15";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -262,7 +262,7 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
                 try { vid.pause(); } catch (e) { /* freeze the frame if we can */ }
 
                 // Show Import immediately - never gate reaching the accept
-                // screen on anything else. OCR (Tesseract, see readLabel) is
+                // screen on anything else. OCR (Tesseract, see runOcr) is
                 // deliberately not run automatically here: it takes real
                 // seconds, and most scans are repeat-scans of already-known
                 // parts where a name is never needed. It's a separate,
@@ -413,6 +413,188 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Label cropper                                                      */
+/*                                                                     */
+/*  A photo of a bin label taken on a workbench is mostly not label -  */
+/*  desk, other boxes, tools. OCR over the whole frame returns junk,   */
+/*  the same way the barcode scanner returned junk before it started   */
+/*  rejecting anything outside its guide box. Same discipline here:    */
+/*  the user says which part of the photo is the text, and nothing     */
+/*  outside it is ever considered.                                     */
+/* ------------------------------------------------------------------ */
+function LabelCropper({ file, onCancel, onConfirm }) {
+  const [url, setUrl] = useState(null);
+  const [dims, setDims] = useState(null);      // { w, h } natural pixels
+  const [rect, setRect] = useState(null);      // natural pixels
+  const frameRef = useRef(null);
+  const imgRef = useRef(null);
+  const dragRef = useRef(null);
+
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  const onLoad = (e) => {
+    const im = e.currentTarget;
+    const w = im.naturalWidth, h = im.naturalHeight;
+    setDims({ w, h });
+    // Start with a wide band across the middle - about where a label sits
+    // when someone photographs one lying flat.
+    setRect({ x: w * 0.08, y: h * 0.34, w: w * 0.84, h: h * 0.32 });
+  };
+
+  // Pointer position -> natural image pixels. The frame element is sized to
+  // the image's exact aspect ratio, so it *is* the drawn image area - no
+  // letterboxing maths needed.
+  const toNatural = (clientX, clientY) => {
+    const fr = frameRef.current, d = dims;
+    if (!fr || !d) return null;
+    const r = fr.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      x: Math.max(0, Math.min(d.w, ((clientX - r.left) / r.width) * d.w)),
+      y: Math.max(0, Math.min(d.h, ((clientY - r.top) / r.height) * d.h)),
+    };
+  };
+
+  const down = (e) => {
+    const p = toNatural(e.clientX, e.clientY);
+    if (!p) return;
+    dragRef.current = p;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* not fatal */ }
+  };
+  const move = (e) => {
+    const a = dragRef.current;
+    if (!a) return;
+    const p = toNatural(e.clientX, e.clientY);
+    if (!p) return;
+    setRect({
+      x: Math.min(a.x, p.x), y: Math.min(a.y, p.y),
+      w: Math.abs(p.x - a.x), h: Math.abs(p.y - a.y),
+    });
+  };
+  const up = () => {
+    const d = dims, r = rect;
+    dragRef.current = null;
+    // Ignore a stray tap - keep whatever box was there rather than leaving
+    // a sliver that would OCR to nothing.
+    if (d && r && (r.w < d.w * 0.04 || r.h < d.h * 0.02)) {
+      setRect({ x: d.w * 0.08, y: d.h * 0.34, w: d.w * 0.84, h: d.h * 0.32 });
+    }
+  };
+
+  const confirm = () => {
+    const im = imgRef.current, r = rect;
+    if (!im || !r || !dims) return;
+    onConfirm(preprocess(im, r));
+  };
+
+  const pct = (v, total) => `${(v / total) * 100}%`;
+
+  return (
+    <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
+      <div className="flex items-center justify-between p-4 border-b border-slate-800 shrink-0">
+        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Drag a box round the text</span>
+        <button onClick={onCancel} className="text-slate-300 p-2"><X size={24} /></button>
+      </div>
+
+      <div className="flex-1 min-h-0 flex items-center justify-center p-2 overflow-hidden">
+        <div
+          ref={frameRef}
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onPointerCancel={up}
+          className="relative touch-none select-none max-w-full max-h-full"
+          style={dims ? { aspectRatio: `${dims.w} / ${dims.h}`, width: "100%" } : undefined}
+        >
+          {url && (
+            <img
+              ref={imgRef}
+              src={url}
+              alt=""
+              onLoad={onLoad}
+              draggable={false}
+              className="w-full h-full object-fill pointer-events-none"
+            />
+          )}
+          {rect && dims && (
+            <>
+              <div className="absolute inset-0 bg-slate-950/55 pointer-events-none" />
+              <div
+                className="absolute border-2 border-lime-400 pointer-events-none"
+                style={{
+                  left: pct(rect.x, dims.w), top: pct(rect.y, dims.h),
+                  width: pct(rect.w, dims.w), height: pct(rect.h, dims.h),
+                  boxShadow: "0 0 0 9999px rgba(2,6,23,0.55)",
+                }}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 space-y-2 shrink-0">
+        <p className="text-xs text-slate-500 text-center leading-relaxed">
+          Drag across the part name and number. Leave out the barcode and anything else in shot.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Btn onClick={onCancel}>Retake</Btn>
+          <Btn variant="primary" onClick={confirm} disabled={!rect}>
+            <Check size={18} /> Read this
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Crop to the chosen box, then greyscale and stretch the contrast. Phone
+ * photos of laminated labels are low-contrast and glary; Tesseract does
+ * markedly better on a clean, adequately sized greyscale image than on a
+ * 12-megapixel colour one. Returns a canvas, which recognize() accepts. */
+function preprocess(img, rect, maxDim = 1800, minDim = 900) {
+  const sx = Math.round(rect.x), sy = Math.round(rect.y);
+  const sw = Math.max(1, Math.round(rect.w)), sh = Math.max(1, Math.round(rect.h));
+  const longest = Math.max(sw, sh);
+  let scale = 1;
+  if (longest > maxDim) scale = maxDim / longest;
+  else if (longest < minDim) scale = Math.min(3, minDim / longest);  // upscale tight crops
+
+  const cw = Math.max(1, Math.round(sw * scale));
+  const ch = Math.max(1, Math.round(sh * scale));
+  const cv = document.createElement("canvas");
+  cv.width = cw; cv.height = ch;
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+
+  try {
+    const image = ctx.getImageData(0, 0, cw, ch);
+    const px = image.data;
+    const lum = new Uint8ClampedArray(cw * ch);
+    let min = 255, max = 0;
+    for (let i = 0, j = 0; i < px.length; i += 4, j += 1) {
+      const v = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+      lum[j] = v;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const range = Math.max(1, max - min);
+    for (let i = 0, j = 0; i < px.length; i += 4, j += 1) {
+      const v = ((lum[j] - min) * 255) / range;
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+    ctx.putImageData(image, 0, 0);
+  } catch (e) { /* tainted canvas shouldn't happen on a local blob; plain crop is fine */ }
+
+  return cv;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main app                                                           */
 /* ------------------------------------------------------------------ */
 export default function PartCounter() {
@@ -435,6 +617,7 @@ export default function PartCounter() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(null);
   const [ocrError, setOcrError] = useState(null);
+  const [cropFile, setCropFile] = useState(null);
   const [labelLines, setLabelLines] = useState([]);
   const [nameOptions, setNameOptions] = useState([]);
   const fileRef = useRef(null);
@@ -551,8 +734,10 @@ export default function PartCounter() {
     setOcrProgress(null);
   };
 
-  const readLabel = async (file) => {
-    if (!file) return;
+  // Takes the cropped, preprocessed canvas from LabelCropper - not the raw
+  // photo. recognize() accepts a canvas directly.
+  const runOcr = async (canvas) => {
+    if (!canvas) return;
     ocrCancelledRef.current = false;
     setOcrBusy(true);
     setOcrProgress({ status: "starting up", pct: 0 });
@@ -560,8 +745,12 @@ export default function PartCounter() {
     let worker = null;
     let step = "loading the OCR engine";
     try {
+      // "dan+eng": the labels are Danish ("Blindnitte", "skive"), but part
+      // descriptions mix in English and abbreviations. English alone scored
+      // Danish words against English vocabulary and returned confident
+      // nonsense - the language model matters as much as the glyphs.
       worker = await withTimeout(
-        createWorker("eng", 1, {
+        createWorker("dan+eng", 1, {
           // Root-absolute, not relative: the doc doesn't say whether these
           // resolve against the page or against the worker's own URL, and
           // getting it wrong would silently break OCR. A leading slash
@@ -584,8 +773,13 @@ export default function PartCounter() {
         45000
       );
       if (ocrCancelledRef.current) return;
+
+      // The crop is one block of label text, not a document page. The default
+      // (AUTO) tries to find columns and reading order in it and does badly.
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
+
       step = "recognizing text";
-      const { data } = await withTimeout(worker.recognize(file), 20000);
+      const { data } = await withTimeout(worker.recognize(canvas), 40000);
       if (ocrCancelledRef.current) return;
       const lines = (data.text || "")
         .split("\n")
@@ -598,7 +792,7 @@ export default function PartCounter() {
         setView("picklabel");
         return;
       }
-      flash("No text found on that photo. Try again closer.");
+      flash("No text found in that box. Try again, closer or better lit.");
     } catch (e) {
       if (!ocrCancelledRef.current) {
         const detail = e && e.message === "timeout"
@@ -609,7 +803,6 @@ export default function PartCounter() {
     } finally {
       if (worker) worker.terminate().catch(() => {});
       if (!ocrCancelledRef.current) { setOcrBusy(false); setOcrProgress(null); }
-      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -1269,8 +1462,21 @@ export default function PartCounter() {
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(e) => readLabel(e.target.files && e.target.files[0])}
+        onChange={(e) => {
+          const f = e.target.files && e.target.files[0];
+          // Clear immediately so retaking the same photo still fires onChange
+          if (fileRef.current) fileRef.current.value = "";
+          if (f) setCropFile(f);
+        }}
       />
+
+      {cropFile && (
+        <LabelCropper
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onConfirm={(canvas) => { setCropFile(null); runOcr(canvas); }}
+        />
+      )}
 
       {ocrBusy && (
         <div className="fixed inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center gap-4 px-8">
