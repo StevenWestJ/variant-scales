@@ -115,6 +115,18 @@ shows live progress from Tesseract's `logger` callback and has a Cancel button a
 second line of defense, so the user is never truly stuck regardless of what the
 timeout does or doesn't catch.
 
+**First real-device test (2026-08-06, pc-v11) failed** with only a generic "couldn't
+read that image" message — not diagnosable from that alone. Checked the two most
+likely self-hosting gotchas directly against the live site (`curl -I` against each
+asset once visitor-access protection was briefly turned off): WASM served as
+`Content-Type: application/wasm` (correct), and the gzipped language data served with
+matching `Content-Length` and no silent re-encoding (correct). Both ruled out by
+evidence, not assumption. The real cause is still open — pc-v12 replaces the generic
+message with a dismissible, selectable panel showing exactly which step failed
+(decoding the photo / loading the engine / recognizing text) and the underlying JS
+error name and message, so the next failure is diagnosable without another
+screenshot-and-guess round trip.
+
 **Not run automatically after a barcode scan.** Unlike the old (nonexistent, it turns
 out) `TextDetector` plan, Tesseract takes real seconds even when cached — running it
 on every single lock, including repeat scans of already-known parts that never use the

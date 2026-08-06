@@ -13,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v11";
+const BUILD = "pc-v12";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -434,6 +434,7 @@ export default function PartCounter() {
   const [importText, setImportText] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(null);
+  const [ocrError, setOcrError] = useState(null);
   const [labelLines, setLabelLines] = useState([]);
   const [nameOptions, setNameOptions] = useState([]);
   const fileRef = useRef(null);
@@ -555,9 +556,12 @@ export default function PartCounter() {
     ocrCancelledRef.current = false;
     setOcrBusy(true);
     setOcrProgress({ status: "starting up", pct: 0 });
+    setOcrError(null);
     let worker = null;
+    let step = "decoding the photo";
     try {
       const bmp = await createImageBitmap(file);
+      step = "loading the OCR engine";
       worker = await withTimeout(
         createWorker("eng", 1, {
           // Root-absolute, not relative: the doc doesn't say whether these
@@ -582,6 +586,7 @@ export default function PartCounter() {
         45000
       );
       if (ocrCancelledRef.current) return;
+      step = "recognizing text";
       const { data } = await withTimeout(worker.recognize(bmp), 20000);
       if (ocrCancelledRef.current) return;
       const lines = (data.text || "")
@@ -598,9 +603,10 @@ export default function PartCounter() {
       flash("No text found on that photo. Try again closer.");
     } catch (e) {
       if (!ocrCancelledRef.current) {
-        flash(e && e.message === "timeout"
-          ? "That took too long. Try again, or type the name."
-          : "Couldn't read that image. Try again, or type the code.");
+        const detail = e && e.message === "timeout"
+          ? `Timed out while ${step}.`
+          : `Failed while ${step}: ${(e && (e.name ? `${e.name}: ` : "") + (e.message || String(e))) || "unknown error"}`;
+        setOcrError(detail);
       }
     } finally {
       if (worker) worker.terminate().catch(() => {});
@@ -1283,6 +1289,20 @@ export default function PartCounter() {
             First time takes longer — downloading the reader
           </div>
           <Btn onClick={cancelOcr} className="mt-2">Cancel</Btn>
+        </div>
+      )}
+
+      {ocrError && (
+        <div className="fixed inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center gap-4 px-6">
+          <AlertTriangle className="text-amber-400" size={32} />
+          <div className="text-sm text-slate-300 text-center">Couldn't read that label.</div>
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-lg p-3 font-mono text-xs text-amber-300 break-words select-all max-h-40 overflow-y-auto">
+            {ocrError}
+          </div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-600 text-center">
+            Tap the box above to select it, then read it out or send it over
+          </div>
+          <Btn variant="primary" onClick={() => setOcrError(null)} className="mt-2">OK, type the name instead</Btn>
         </div>
       )}
 

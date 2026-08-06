@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.8 — built, awaiting shop-floor test
+**Status:** v0.9 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,13 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.9 (2026-08-06)** — Tesseract OCR failed its first real-device test with only a
+  generic error. Ruled out the two likely self-hosting gotchas (WASM MIME type, gzip
+  double-encoding) by checking the live site's actual response headers — both correct.
+  Real cause still open. Replaced the generic failure message with a persistent,
+  selectable panel showing which step failed and the underlying error, so the next
+  attempt is diagnosable. Build bumped to `pc-v12`.
 
 - **v0.8 (2026-08-06)** — Label reading now actually works: bundled a self-hosted
   Tesseract.js (on-device OCR, ~11MB of assets vendored into `public/tesseract/`,
