@@ -34,6 +34,14 @@ It runs on **one Android phone**, hosted on Netlify, installed as a PWA.
    first output and imported codes from frames pointed at nothing. The whole point of
    the tool is eliminating manual errors that reach compliance documents. A silently
    wrong count is worse than no count.
+
+   **Corollary — a scanned barcode outranks anything OCR produces.** The label reader
+   used to route its "which line is the part number?" answer through `openCode()`,
+   which reassigns `activeCode` — so reading a name off a label silently replaced the
+   scanned part number with OCR text (fixed 2026-08-07, pc-v16). When a code is already
+   known, the pick screen never offers to change it and says where it came from. If you
+   add another source of part numbers, rank it against this: decoded barcode first,
+   typed-by-user second, OCR last and never silently.
 2. **Manual entry always works.** Camera, text detection and network are all optional
    paths. If any of them fail, the user must still be able to type a code and count.
 3. **No paid services in the critical path.** Costs come out of his pocket, not the

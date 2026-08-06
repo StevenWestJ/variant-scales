@@ -1,4 +1,4 @@
-const VERSION = "pc-v15";
+const VERSION = "pc-v16";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", (e) => {

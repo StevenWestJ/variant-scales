@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.12 — built, awaiting shop-floor test
+**Status:** v0.13 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -109,6 +109,15 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.13 (2026-08-07)** — Two bugs found in real use of the label reader. **Reading a
+  label overwrote the scanned part number**: the pick screen routed the chosen line
+  through `openCode()`, which reassigns the active code, so an OCR guess silently
+  replaced authoritative barcode data. When a code is already known the screen now only
+  asks for the name, shows the number, and states it came from the barcode and can't be
+  changed. **Descriptions that wrap onto two lines can now be selected as one name** —
+  the pick screen is multi-select, joins the chosen lines in label order, and previews
+  the result before you commit. Build bumped to `pc-v16`.
 
 - **v0.12 (2026-08-07)** — OCR ran but returned text unrelated to the label. Three
   compounding causes, all fixed: it was reading Danish labels with an English-only

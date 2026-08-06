@@ -13,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v15";
+const BUILD = "pc-v16";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -619,6 +619,9 @@ export default function PartCounter() {
   const [ocrError, setOcrError] = useState(null);
   const [cropFile, setCropFile] = useState(null);
   const [labelLines, setLabelLines] = useState([]);
+  const [labelStage, setLabelStage] = useState("name");   // "code" | "name"
+  const [pickedCode, setPickedCode] = useState(null);
+  const [pickedName, setPickedName] = useState([]);       // indices into labelLines
   const [nameOptions, setNameOptions] = useState([]);
   const fileRef = useRef(null);
   const ocrCancelledRef = useRef(false);
@@ -789,6 +792,11 @@ export default function PartCounter() {
         .slice(0, 12);
       if (lines.length) {
         setLabelLines(lines);
+        setPickedCode(null);
+        setPickedName([]);
+        // A scanned barcode is authoritative and OCR is a guess. If we already
+        // have a code, never offer to change it - only ask for the name.
+        setLabelStage(activeCode ? "name" : "code");
         setView("picklabel");
         return;
       }
@@ -994,30 +1002,132 @@ export default function PartCounter() {
     }
 
     if (view === "picklabel") {
+      const knownCode = activeCode || pickedCode;
+      const clearLabel = () => { setLabelLines([]); setPickedCode(null); setPickedName([]); };
+
+      // Joined in the order the lines appear on the label, not tap order - a
+      // description that wrapped onto two lines reads correctly that way.
+      const joinedName = pickedName
+        .slice().sort((a, b) => a - b)
+        .map((i) => labelLines[i])
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (labelStage === "code") {
+        return (
+          <>
+            <Header title="Which line is the part number?" back={() => { clearLabel(); setView("home"); }} />
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-slate-400 leading-relaxed">
+                Tap the part number. You'll pick the name next.
+              </p>
+              <div className="space-y-2">
+                {labelLines.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => { setPickedCode(t); setLabelStage("name"); }}
+                    className="w-full text-left bg-slate-800 border border-slate-700 rounded-lg p-4 active:bg-slate-700 font-mono text-slate-100 break-all"
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <Btn onClick={() => { clearLabel(); setView("manual"); }} className="w-full">
+                None of these — type it
+              </Btn>
+            </div>
+          </>
+        );
+      }
+
       return (
         <>
-          <Header title="What did it read?" back={() => { setLabelLines([]); setView("home"); }} />
+          <Header
+            title="Which lines are the name?"
+            back={() => {
+              if (!activeCode) { setLabelStage("code"); setPickedName([]); return; }
+              clearLabel(); setView("newpart");
+            }}
+          />
           <div className="p-4 space-y-4">
+            {knownCode && (
+              <Panel className="p-4">
+                <Label>Part number</Label>
+                <div className="font-mono text-xl text-amber-300 break-all">{knownCode}</div>
+                {activeCode && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    From the barcode. The label reading can't change it.
+                  </p>
+                )}
+              </Panel>
+            )}
+
             <p className="text-sm text-slate-400 leading-relaxed">
-              Tap the line that is the part code. Anything else on the label is offered as the name next.
+              Tap every line that's part of the name. If the description runs onto a second
+              line, tap both and they'll be joined.
             </p>
+
             <div className="space-y-2">
-              {labelLines.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    const rest = labelLines.filter((x) => x !== t);
-                    setLabelLines([]);
-                    openCode(t, null, rest[0] || "", rest);
-                  }}
-                  className="w-full text-left bg-slate-800 border border-slate-700 rounded-lg p-4 active:bg-slate-700 font-mono text-slate-100 break-all"
-                >
-                  {t}
-                </button>
-              ))}
+              {labelLines.map((t, i) => {
+                const on = pickedName.includes(i);
+                return (
+                  <button
+                    key={`${i}-${t}`}
+                    onClick={() => setPickedName(on ? pickedName.filter((x) => x !== i) : [...pickedName, i])}
+                    className={`w-full text-left rounded-lg p-4 border break-all flex items-start gap-3 ${
+                      on ? "bg-amber-400 text-slate-950 border-amber-400" : "bg-slate-800 text-slate-100 border-slate-700 active:bg-slate-700"
+                    }`}
+                  >
+                    <span className={`shrink-0 mt-0.5 w-5 h-5 rounded border flex items-center justify-center ${
+                      on ? "border-slate-950 bg-slate-950" : "border-slate-600"
+                    }`}>
+                      {on && <Check size={14} className="text-amber-400" />}
+                    </span>
+                    <span>{t}</span>
+                  </button>
+                );
+              })}
             </div>
-            <Btn onClick={() => { setLabelLines([]); setView("manual"); }} className="w-full">
-              None of these — type it
+
+            {joinedName && (
+              <Panel className="p-4">
+                <Label>Name will be</Label>
+                <div className="text-lg text-slate-100 break-words">{joinedName}</div>
+              </Panel>
+            )}
+
+            <Btn
+              variant="primary"
+              className="w-full"
+              disabled={!joinedName}
+              onClick={() => {
+                const name = joinedName;
+                const code = pickedCode;
+                const lines = labelLines;
+                clearLabel();
+                if (activeCode) {
+                  // Code came from the barcode - only fill the name in.
+                  setNewPart((p) => ({ ...p, name }));
+                  setView("newpart");
+                } else {
+                  openCode(code, null, name, lines);
+                }
+              }}
+            >
+              <Check size={18} /> Use this name
+            </Btn>
+            <Btn
+              onClick={() => {
+                const code = pickedCode;
+                const lines = labelLines;
+                clearLabel();
+                if (activeCode) { setView("newpart"); return; }
+                openCode(code, null, "", lines);
+              }}
+              className="w-full"
+            >
+              Skip — type the name
             </Btn>
           </div>
         </>
