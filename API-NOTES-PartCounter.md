@@ -2,37 +2,54 @@
 
 Living document. Add findings as we hit them.
 
+The app moved out of the Claude-artifact sandbox onto a real `src/` + `build.sh`
+pipeline, deployed as a standalone PWA (see `CLAUDE.md`). Sections below marked
+**(artifact-era, historical)** describe the old sandbox and no longer apply — kept
+because the reasoning (why live camera needed a real PWA) is still useful context.
+
 ## Stack
 
 | Thing | Version | Notes |
 |---|---|---|
-| React | 18 (artifact runtime) | Function components + hooks only |
-| lucide-react | 0.383.0 | Icon set; pinned by the artifact runtime |
-| Tailwind CSS | Core utilities only | **No arbitrary values** (`bg-[#123456]` will not work) — no compiler in the artifact sandbox. Stick to the default palette. |
+| React | 18.3.1 | Function components + hooks only, bundled by esbuild |
+| lucide-react | 0.383.0 | Icon set |
+| Tailwind CSS | 3.4.19 | Compiled by `build.sh`, so arbitrary values (`text-[11px]`) work fine now |
 
 ## Label reading (photo → text)
 
 Barcodes carry the code only. To capture the description printed on the bin label, the
-app photographs the label and sends it to the Anthropic API for reading.
+app reads it on-device with `TextDetector` — free, offline, no key.
 
 - Capture uses `<input type="file" accept="image/*" capture="environment">`. This opens
   the native camera and **works on iOS as well as Android** — unlike `getUserMedia`,
   it needs no iframe camera permission. It is the most portable capture path available.
-- Image is read with `FileReader.readAsDataURL`, the `data:` prefix stripped, and sent
-  as a base64 `image` content block alongside a text instruction.
-- Model: `claude-sonnet-4-6`, `max_tokens: 1000`. No API key is passed — the artifact
-  runtime handles auth.
-- The model is asked for JSON only; the response is stripped of any ``` fences before
-  `JSON.parse`. Known part codes are passed in as reference so the code format matches
-  what is already in the library.
-- Result **prefills an editable form**. It is never saved automatically — OCR on a
-  scuffed workshop label will get things wrong, and a wrong name silently attached to a
-  count is worse than typing it.
-- Requires a network connection. Fails soft to scan/type.
+- The photo is decoded with `createImageBitmap`, then `new TextDetector().detect(bitmap)`
+  returns text blocks. Lines are deduped and length-filtered, then shown as tappable
+  chips — the user picks which line is the code and which is the name. Nothing is
+  inferred or auto-matched against the parts library.
+- Result **prefills an editable form**. Never saved automatically — OCR on a scuffed
+  workshop label will get things wrong, and a wrong name silently attached to a count
+  is worse than typing it.
+- `TextDetector` missing (see support table below) → the button tells the user to type
+  the name instead. No fallback path, paid or otherwise.
 
-## Artifact storage API
+**Removed 2026-08-06:** an earlier build sent the photo to `api.anthropic.com` with a
+user-entered API key when `TextDetector` was unsupported. Steven doesn't want to pay for
+this, so the paid fallback is gone — see the non-negotiable in `CLAUDE.md`. Don't
+reintroduce it.
 
-No public versioned docs exist for this. Behaviour observed:
+### TextDetector support
+
+Same Shape Detection API family as `BarcodeDetector` — Chrome/Edge on Android, not
+Safari/iOS, not Firefox. Same caveat as `BarcodeDetector` below: feature-detect, never
+assume.
+
+## Artifact storage API (artifact-era, historical)
+
+Superseded by plain `localStorage` under the key `stocktake-v1` once the app left the
+artifact sandbox — `localStorage` works fine in a normal page/PWA; it was only the
+artifact iframe that blocked it. No public versioned docs exist for this. Behaviour
+observed:
 
 ```js
 await window.storage.set(key, value, shared?)   // value must be a string
@@ -77,7 +94,7 @@ failing silently.
 Detection loop uses `requestAnimationFrame` and stops on first hit, then vibrates via
 `navigator.vibrate(60)` (Android only; a no-op elsewhere).
 
-### Confirmed on device (2026-08-05)
+### Confirmed on device (2026-08-05, artifact-era, historical)
 
 Live camera **is blocked** in the artifact frame — `getUserMedia` throws before the
 barcode decoder ever runs. This is the iframe's permissions policy, not a device

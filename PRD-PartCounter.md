@@ -1,8 +1,8 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.1 — built, awaiting shop-floor test
-**Last updated:** 2026-08-05
+**Status:** v0.4 — built, awaiting shop-floor test
+**Last updated:** 2026-08-06
 
 ---
 
@@ -104,6 +104,13 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.4 (2026-08-06)** — Removed the paid Anthropic API label-reading fallback; label
+  reading is on-device `TextDetector` only now, or type it in. Fixed a scoping bug in
+  the scanner's lock-on capture that silently broke the freeze-frame and the on-device
+  text read (the Import button itself was unaffected). Added a build number (`BUILD` in
+  `src/app.jsx`, matches `VERSION` in `public/sw.js`) shown at the bottom of Setup, so
+  it's visible which build a phone is actually running.
 
 - **v0.3 (2026-08-05)** — Label reading. Photograph a bin label and the printed part
   number and description are read off it and prefilled, editable. Works on iOS too.

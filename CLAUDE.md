@@ -37,7 +37,10 @@ It runs on **one Android phone**, hosted on Netlify, installed as a PWA.
 2. **Manual entry always works.** Camera, text detection and network are all optional
    paths. If any of them fail, the user must still be able to type a code and count.
 3. **No paid services in the critical path.** Costs come out of his pocket, not the
-   company's. On-device and free, or it doesn't ship.
+   company's. On-device and free, or it doesn't ship. A build briefly called the
+   Anthropic API with a user-supplied key for label reading — removed 2026-08-06.
+   Label reading is `TextDetector` only now; if it's unsupported, the user types the
+   name. Don't reintroduce a paid fallback here.
 4. **Offline must work.** There are network dead zones on the factory floor. Counting,
    calibration, the log and CSV export are all local and must stay that way.
 
@@ -68,6 +71,11 @@ connected.
 **Bump `VERSION` in `public/sw.js` on every deploy** (`pc-v6` → `pc-v7`). The service
 worker serves the cached copy first. Forget this and Steven tests yesterday's build and
 reports your fix didn't work. It has happened.
+
+**Also bump `BUILD` in `src/app.jsx`, to the same string.** It's shown at the bottom of
+Setup on the phone. This exists specifically so Steven can tell you what he's looking at
+without guessing whether the service worker cache caught up — check it before debugging
+a report that a fix "didn't work."
 
 ## Browser APIs — where the pain lives
 
@@ -105,6 +113,15 @@ The box is red when nothing is in view, amber when it can see a code but won't t
 is deliberate — it means nothing is being considered.
 
 Don't "simplify" any of this away. Each step is a bug that was reported from the floor.
+
+**2026-08-06 bug:** the capture-on-lock code declared `vid`/`cv` with `const` inside a
+`try` block, then referenced them again after the block closed — a `ReferenceError`,
+silently swallowed by the surrounding `catch`. Effect: the video never actually froze
+on lock, and on-device text detection never ran, both failing silently. The Import
+button itself still worked, so this looked like nothing was wrong until you noticed the
+frame wasn't frozen and no label chips ever appeared. Fixed by declaring both above the
+`try`. Watch for this pattern generally — a `try { const x = … }` followed by code
+outside the block that still expects `x` is invisible in review and silent at runtime.
 
 ## Data
 

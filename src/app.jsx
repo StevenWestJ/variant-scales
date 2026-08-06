@@ -10,6 +10,10 @@ import {
 /* ------------------------------------------------------------------ */
 const KEY = "stocktake-v1";
 
+// Bump on every change, together with VERSION in public/sw.js.
+// Shown in Setup so it's obvious which build a phone is running.
+const BUILD = "pc-v7";
+
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
   entries: [],        // { id, code, name, category, grossG, tareG, netG, gPerPiece, count, note, ts }
@@ -17,7 +21,7 @@ const DEFAULT_DATA = {
     { id: "c1", name: "Blue tote", g: 0 },
   ],
   categories: ["Bolts", "Nuts", "Washers", "Screws", "Rivets", "Split pins", "Clips", "Springs", "Other"],
-  settings: { resolutionG: 0.1, location: "Building 1", apiKey: "" },
+  settings: { resolutionG: 0.1, location: "Building 1" },
 };
 
 async function loadData() {
@@ -231,10 +235,11 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
               setCandidate({ value: v, count: agreeRef.current.count });
 
               if (agreeRef.current.count >= CONFIRMATIONS) {
+                const vid = videoRef.current;
                 let frame = null;
+                let cv = null;
                 try {
-                  const vid = videoRef.current;
-                  const cv = document.createElement("canvas");
+                  cv = document.createElement("canvas");
                   cv.width = vid.videoWidth || 1280;
                   cv.height = vid.videoHeight || 720;
                   cv.getContext("2d").drawImage(vid, 0, 0, cv.width, cv.height);
@@ -248,7 +253,7 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
                 // Free, on-device text read - no key, no network, no cost
                 let lines = [];
                 try {
-                  if ("TextDetector" in window) {
+                  if (cv && "TextDetector" in window) {
                     const td = new window.TextDetector();
                     const blocks = await td.detect(cv);
                     lines = blocks
@@ -528,129 +533,31 @@ export default function PartCounter() {
     flash(`Logged ${entry.count} × ${entry.name}`);
   };
 
+  // On-device text detection only. No key, no network, no cost. If the
+  // browser lacks TextDetector, the user types the name — never blocked.
   const readLabel = async (file) => {
     if (!file) return;
-
-    // Free path first: on-device text detection, no key and no network
-    if ("TextDetector" in window) {
-      setOcrBusy(true);
-      try {
-        const bmp = await createImageBitmap(file);
-        const blocks = await new window.TextDetector().detect(bmp);
-        const lines = blocks
-          .map((b) => String(b.rawValue || "").trim())
-          .filter((t) => t.length > 1 && t.length < 60)
-          .filter((t, i, a) => a.indexOf(t) === i)
-          .slice(0, 12);
-        if (lines.length) {
-          setLabelLines(lines);
-          setView("picklabel");
-          return;
-        }
-        flash("No text found on that photo. Try again closer.");
-        return;
-      } catch (e) {
-        flash("Couldn't read that image. Try again, or type the code.");
-        return;
-      } finally { setOcrBusy(false); }
-    }
-
-    if (!data.settings.apiKey) {
+    if (!("TextDetector" in window)) {
       flash("This browser can't read text on-device. Scan the barcode or type the code.");
       return;
     }
-    const b64 = await new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = () => res(r.result.split(",")[1]);
-      r.onerror = () => rej(new Error("read failed"));
-      r.readAsDataURL(file);
-    });
-    return readLabelB64(b64, file.type === "image/png" ? "image/png" : "image/jpeg", null);
-  };
-
-  // knownCode: when the barcode already gave us the number, only the name is wanted
-  const readLabelB64 = async (b64, media, knownCode) => {
-    if (!b64 || !data.settings.apiKey) return;
     setOcrBusy(true);
     try {
-      const known = Object.values(data.parts).map((p) => `${p.code} = ${p.name}`).slice(0, 200).join("\n");
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": data.settings.apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5-20250929",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: media, data: b64 } },
-              {
-                type: "text",
-                text:
-`This is a photo of a parts bin label in a trailer factory. Read the printed text. The part number is often printed in plain digits directly beneath the barcode — use that.
-
-Return ONLY a JSON object, no markdown, no preamble:
-{"code": ${knownCode ? `"${knownCode}"` : '"the part number exactly as printed, or null"'}, "name": "the part description, or null", "group": "one of ${JSON.stringify(data.categories)}, best guess, or null"}
-
-Keep the code exactly as shown including dashes and letters. Keep the name short — what the part is, not marketing text. Do not invent anything you cannot read.
-
-Known parts for reference (match the code format if it fits):
-${known || "(none yet)"}`
-              },
-            ],
-          }],
-        }),
-      });
-      const json = await resp.json().catch(() => null);
-
-      if (!resp.ok || !json || json.error) {
-        const detail = (json && json.error && json.error.message) || `HTTP ${resp.status}`;
-        if (resp.status === 401) flash("API key rejected. Check it under Setup.");
-        else if (resp.status === 400 && /credit|balance/i.test(detail)) flash("API account has no credit. Top up at console.anthropic.com.");
-        else if (resp.status === 429) flash("Rate limited. Wait a moment and try again.");
-        else flash(`Label reading failed: ${detail}`.slice(0, 140));
+      const bmp = await createImageBitmap(file);
+      const blocks = await new window.TextDetector().detect(bmp);
+      const lines = blocks
+        .map((b) => String(b.rawValue || "").trim())
+        .filter((t) => t.length > 1 && t.length < 60)
+        .filter((t, i, a) => a.indexOf(t) === i)
+        .slice(0, 12);
+      if (lines.length) {
+        setLabelLines(lines);
+        setView("picklabel");
         return;
       }
-
-      const text = (json.content || []).filter((c) => c.type === "text").map((c) => c.text).join("");
-      if (!text) { flash("No text came back from the reader. Type the name instead."); return; }
-      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-
-      if (knownCode) {
-        setActiveCode(knownCode);
-        setNewPart({
-          name: parsed.name || "",
-          category: data.categories.includes(parsed.group) ? parsed.group : data.categories[0],
-        });
-        setView("newpart");
-        if (parsed.name) flash("Read the name off the label — check it");
-      } else if (parsed.code && data.parts[parsed.code]) {
-        openCode(parsed.code);
-        flash(`Found ${data.parts[parsed.code].name}`);
-      } else if (parsed.code) {
-        setActiveCode(parsed.code);
-        setNewPart({
-          name: parsed.name || "",
-          category: data.categories.includes(parsed.group) ? parsed.group : data.categories[0],
-        });
-        setView("newpart");
-      } else if (parsed.name) {
-        setNewPart({ name: parsed.name, category: data.categories[0] });
-        setView("manual");
-        flash("Read the name but not the code. Type or scan the code.");
-      } else {
-        flash("Couldn't read that label. Try again closer, or type it in.");
-      }
+      flash("No text found on that photo. Try again closer.");
     } catch (e) {
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      flash(offline
-        ? "You're offline. Label reading needs a connection — type the name instead."
-        : `Label reading failed: ${(e && e.message) || "unknown error"}`.slice(0, 140));
+      flash("Couldn't read that image. Try again, or type the code.");
     } finally {
       setOcrBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -1272,26 +1179,15 @@ ${known || "(none yet)"}`
         </div>
 
         <div>
-          <Label>Label reading (optional)</Label>
-          <p className="text-xs text-slate-500 mb-2">
-            An Anthropic API key lets the app read part names off a photographed label.
-            Stored on this phone only. Leave blank to scan and type instead.
-          </p>
-          <input
-            type="password"
-            value={data.settings.apiKey || ""}
-            onChange={(e) => save({ ...data, settings: { ...data.settings, apiKey: e.target.value } })}
-            placeholder="sk-ant-..."
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 font-mono text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-400"
-          />
-        </div>
-
-        <div>
           <Label>Data</Label>
           <Btn onClick={download} className="w-full mb-2"><Download size={18} /> Export stocktake CSV</Btn>
           <Btn variant="danger" onClick={() => {
             if (confirm("Clear the log? Parts and calibrations stay.")) save({ ...data, entries: [] });
           }} className="w-full">Clear the log</Btn>
+        </div>
+
+        <div className="pt-2 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-mono">
+          Build {BUILD}
         </div>
       </div>
     </>
