@@ -60,11 +60,15 @@ required files are vendored into `public/tesseract/` and committed to the repo:
 
 ```
 public/tesseract/worker.min.js                        — from tesseract.js's dist/
-public/tesseract/core/tesseract-core-lstm.{js,wasm}
-public/tesseract/core/tesseract-core-simd-lstm.{js,wasm}
-public/tesseract/core/tesseract-core-relaxedsimd-lstm.{js,wasm}
+public/tesseract/core/tesseract-core-lstm.wasm.js
+public/tesseract/core/tesseract-core-simd-lstm.wasm.js
+public/tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js
                                                         — from tesseract.js-core's dist/,
-                                                          LSTM-only variants only (see below)
+                                                          LSTM-only variants only (see
+                                                          below) — the *.wasm.js form
+                                                          specifically, not the smaller
+                                                          .js+.wasm pair also published
+                                                          alongside it
 public/tesseract/lang-data/eng.traineddata.gz          — from tesseract-ocr/tessdata_fast
                                                           on GitHub (Apache-2.0), gzipped
                                                           locally (4.1MB → 2.0MB)
@@ -83,11 +87,31 @@ deployed at the domain root, not a subpath; would need revisiting if that ever c
 `legacyCore: false` (set explicitly, matches Tesseract's own default) tells it to only
 ever pick from the `-lstm` suffixed files. The plain/legacy variants
 (`tesseract-core.*`, `tesseract-core-simd.*`, `tesseract-core-relaxedsimd.*`) are never
-loaded and were deliberately not copied in — cut the vendored footprint roughly in
-half. All three `-lstm` variants (plain/SIMD/relaxed-SIMD) are shipped so Tesseract's
-own `wasm-feature-detect` can pick whichever this specific device supports.
+loaded and were deliberately not copied in. All three `-lstm` variants (plain/SIMD/
+relaxed-SIMD) are shipped so Tesseract's own `wasm-feature-detect` can pick whichever
+this specific device supports.
 
-**Total footprint: ~11MB**, all lazy — nothing here is in the service worker's install-
+**Ship the `.wasm.js` files, not the plain `.js` + `.wasm` pair — confirmed the hard
+way (2026-08-06, pc-v12 → pc-v13).** Each `tesseract.js-core` variant is published as
+*both* a small `tesseract-core-<variant>.js` (~90KB) paired with a separate
+`tesseract-core-<variant>.wasm` binary (~2.8MB), *and* a monolithic
+`tesseract-core-<variant>.wasm.js` (~3.9MB) that embeds the same WASM bytes inline as
+base64 (its size is almost exactly the raw `.wasm` inflated by base64's ~33%
+overhead — that's how you can tell, rather than trial and error, which one a mystery
+file like this actually is). The first real-device test shipped the small pair,
+guessed from file size ("smaller is obviously the right default, the fat one must be
+a fallback") without checking what the code actually does — wrong. `worker.min.js`'s
+own core-loading logic (grep it for `importScripts` and `.wasm.js` if this ever needs
+re-verifying) always constructs a `*.wasm.js` filename and loads it via
+`importScripts()` inside the worker; the small `.js`+`.wasm` pair is for a different
+consumption path this app doesn't use, and was never going to be found. Symptom was a
+clean, specific error once error surfacing existed: `NetworkError: Failed to execute
+'importScripts' ... script ... failed to load` (a 404, in effect) — that specific
+error is what made this fast to actually confirm instead of guessing again.
+`public/tesseract/core/` now holds only the three `*.wasm.js` files (one per
+SIMD/relaxed-SIMD/plain variant) — no separate `.wasm` binaries needed alongside them.
+
+**Total footprint: ~14MB**, all lazy — nothing here is in the service worker's install-
 time `SHELL` precache, so it doesn't slow down or bloat the initial app install. It's
 fetched only the first time "Read the name off the label" is actually used, and the
 service worker's fetch handler now caches any successfully-fetched resource (not just

@@ -13,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v12";
+const BUILD = "pc-v13";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }

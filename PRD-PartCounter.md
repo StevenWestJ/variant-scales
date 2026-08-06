@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.9 — built, awaiting shop-floor test
+**Status:** v0.10 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,14 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.10 (2026-08-07)** — Found the actual cause of the OCR failure, thanks to the
+  detailed error panel added in v0.9: the wrong core-engine file variant was shipped.
+  `tesseract.js-core` publishes each WASM variant two ways — a small `.js`+`.wasm`
+  pair, and a monolithic `.wasm.js` with the WASM bytes embedded inline — and the
+  worker's own code always loads the `.wasm.js` form via `importScripts()`. The small
+  pair was shipped by guessing from file size rather than checking; swapped to the
+  correct files. Build bumped to `pc-v13`.
 
 - **v0.9 (2026-08-06)** — Tesseract OCR failed its first real-device test with only a
   generic error. Ruled out the two likely self-hosting gotchas (WASM MIME type, gzip
