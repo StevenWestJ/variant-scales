@@ -9,10 +9,11 @@ Three levels. Most people stop at level 2.
 Chrome menu → Add to Home screen. Gives an icon, but it still opens in a browser tab
 with the address bar, and it dies without a signal.
 
-## Level 2 — Installed PWA (the `pwa/` folder)
+## Level 2 — Installed PWA (Netlify)
 
-Upload the six files in `pwa/` to the repo root, replacing the single `index.html` you
-have now. Keep `.nojekyll`. Everything else stays as it is.
+The repo builds itself now — `netlify.toml` tells Netlify to run `bash build.sh` and
+publish `dist/`. Connect the repo in Netlify (New site from Git) once; every push to
+`main` deploys automatically. No manual file upload.
 
 What this buys you:
 
@@ -32,16 +33,18 @@ run.
 
 ### Version bumping
 
-When I rebuild the app, bump `VERSION` in `sw.js` (`pc-v1` → `pc-v2`). That's what
-tells installed phones to throw away the old cache. Forget it and they'll keep serving
-the previous build.
+Every deploy bumps `VERSION` in `public/sw.js` and `BUILD` in `src/app.jsx`, together,
+to the same string (`pc-v6` → `pc-v7`). The service worker version is what tells
+installed phones to throw away the old cache — forget it and they'll keep serving the
+previous build. The app-visible `BUILD` is shown at the bottom of Setup on the phone, so
+you can check what you're actually running without guessing whether the cache caught up.
 
 ## Level 3 — Real APK
 
 Only worth it if you want to hand this to other people without them visiting a URL, or
 you want it in a company app store / MDM push.
 
-**PWABuilder** (`pwabuilder.com`) is the shortcut: paste your Pages URL, it packages
+**PWABuilder** (`pwabuilder.com`) is the shortcut: paste your Netlify URL, it packages
 the PWA into a signed Android APK/AAB you can sideload or publish. No Android Studio,
 no Java. It works because the app is already a valid PWA — level 2 is a prerequisite.
 
