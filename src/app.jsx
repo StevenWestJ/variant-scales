@@ -12,7 +12,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v8";
+const BUILD = "pc-v9";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -305,7 +305,7 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
         <span className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Scan part barcode</span>
         <button onClick={onClose} className="text-slate-300 p-2"><X size={24} /></button>
       </div>
-      <div className="flex-1 relative bg-black">
+      <div className="flex-1 min-h-0 relative bg-black">
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div

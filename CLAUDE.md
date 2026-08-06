@@ -137,6 +137,21 @@ capabilities) may sit between lock-on and `setPending`/showing Import. Those cal
 hang on real hardware in ways `try/catch` does not save you from — only a `catch`
 protects against rejection, not against never resolving.**
 
+**2026-08-06 bug (fixed), stacked on top of the one above:** once the previous fix
+actually let `setPending` fire, the Import panel *still* never appeared on device — the
+camera feed filled the entire screen, edge to edge, and even the always-present "Enter
+code by hand" button was invisible. This was a pure CSS bug that the TextDetector hang
+had been masking the whole time: the video sits in a `flex-1` container with no
+`min-height` override, and on this phone the camera stream reports a portrait-oriented
+aspect ratio. Flexbox's default automatic minimum size lets that intrinsic aspect ratio
+act as a floor on how far the video container can shrink, and that floor came out
+taller than the screen — pushing every sibling below it (the Import panel, the bottom
+button row) off the bottom edge with no way to scroll to them. Fixed by adding
+`min-h-0` to the video's flex container. **General lesson: any `flex-1` container
+holding a `<video>`/`<img>`/other intrinsically-sized element needs `min-h-0` (or
+`min-w-0` in a row) or its siblings can get silently pushed off-screen on some devices
+— test on the actual phone, a desktop browser resize won't reproduce this.**
+
 ## Data
 
 Everything is one `localStorage` key, `stocktake-v1`, holding parts, calibrations,

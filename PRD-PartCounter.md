@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.5 — built, awaiting shop-floor test
+**Status:** v0.6 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,12 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.6 (2026-08-06)** — Fixed the Import panel being pushed off-screen after lock:
+  the video's `flex-1` container had no `min-height` override, and on-device the
+  camera stream's portrait aspect ratio was forcing it to claim the full screen height,
+  leaving no room for anything below it (Import, even the always-present "Enter code by
+  hand" button). Added `min-h-0`. Build bumped to `pc-v9`.
 
 - **v0.5 (2026-08-06)** — Fixed the real cause of "scan locks but there's no way to
   accept": the app awaited on-device text detection before showing Import, and that
