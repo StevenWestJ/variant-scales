@@ -18,44 +18,118 @@ because the reasoning (why live camera needed a real PWA) is still useful contex
 ## Label reading (photo → text)
 
 Barcodes carry the code only. To capture the description printed on the bin label, the
-app reads it on-device with `TextDetector` — free, offline, no key.
+app reads it on-device with a self-hosted **Tesseract.js** — free, works offline after
+first use, no key, no CDN dependency at runtime.
 
 - Capture uses `<input type="file" accept="image/*" capture="environment">`. This opens
   the native camera and **works on iOS as well as Android** — unlike `getUserMedia`,
   it needs no iframe camera permission. It is the most portable capture path available.
-- The photo is decoded with `createImageBitmap`, then `new TextDetector().detect(bitmap)`
-  returns text blocks. Lines are deduped and length-filtered, then shown as tappable
-  chips — the user picks which line is the code and which is the name. Nothing is
-  inferred or auto-matched against the parts library.
+- The photo is decoded with `createImageBitmap`, then run through a Tesseract.js worker
+  (`readLabel` in `src/app.jsx`). The recognized text is split into lines, deduped and
+  length-filtered, then shown as tappable chips — the user picks which line is the code
+  and which is the name. Nothing is inferred or auto-matched against the parts library.
 - Result **prefills an editable form**. Never saved automatically — OCR on a scuffed
   workshop label will get things wrong, and a wrong name silently attached to a count
   is worse than typing it.
-- `TextDetector` missing (see support table below) → the button tells the user to type
-  the name instead. No fallback path, paid or otherwise.
+- If OCR fails or times out for any reason, the button tells the user to type the name
+  instead. No fallback path, paid or otherwise.
 
-**Removed 2026-08-06:** an earlier build sent the photo to `api.anthropic.com` with a
-user-entered API key when `TextDetector` was unsupported. Steven doesn't want to pay for
-this, so the paid fallback is gone — see the non-negotiable in `CLAUDE.md`. Don't
-reintroduce it.
+**Why not the native `TextDetector` API:** an earlier build used it — free and
+built-in, no bundling needed. Turned out `"TextDetector" in window` is `false` on
+real, current Chrome for Android: it was never promoted to stable the way
+`BarcodeDetector` was, despite this doc previously (wrongly) claiming otherwise. That
+claim was never actually verified on hardware before being written down — lesson
+learned, see the note in `CLAUDE.md`. Confirmed on device 2026-08-06.
 
-### TextDetector support
+**Removed 2026-08-06 (separately):** an even earlier build sent the photo to
+`api.anthropic.com` with a user-entered API key as the fallback when `TextDetector`
+was unsupported. Steven doesn't want to pay for this — see the non-negotiable in
+`CLAUDE.md`. Don't reintroduce a paid fallback.
 
-Same Shape Detection API family as `BarcodeDetector` — Chrome/Edge on Android, not
-Safari/iOS, not Firefox. Same caveat as `BarcodeDetector` below: feature-detect, never
-assume.
+### Tesseract.js integration (added 2026-08-06)
 
-**It can hang, not just fail.** `detect()` proxies through Play Services on Android;
-confirmed on device (2026-08-06) that it can sit forever without resolving or
-rejecting. A `try/catch` around an `await` does nothing for a call that never settles.
-Never let it — or any other on-device Shape Detection call — sit between "code locked"
-and showing the user the accept/Import screen. Run it after, fire-and-forget, patching
-the result in if it ever comes back.
+`npm install tesseract.js` (pinned `7.0.0`, Apache-2.0). Its `dependencies` already
+include `tesseract.js-core@^7.0.0` — that comes along automatically, no separate
+install needed.
 
-Every direct `await` on a Shape Detection call (the standalone "Photograph the label"
-path, not just the scanner) goes through `withTimeout(promise, 8000)` for the same
-reason — an 8s cap, then fail soft. The `ocrBusy` full-screen loader also has a Cancel
-button as a second line of defense, so the user is never truly stuck regardless of
-what the timeout does or doesn't catch.
+**Self-hosted, not CDN.** By default Tesseract.js fetches its worker script, WASM
+core, and language data from jsDelivr/`tessdata.projectnaptha.com` at runtime — a
+live CDN dependency, which fails "offline must work" and adds a soft external
+dependency to the critical path even though the library itself is free. Instead, the
+required files are vendored into `public/tesseract/` and committed to the repo:
+
+```
+public/tesseract/worker.min.js                        — from tesseract.js's dist/
+public/tesseract/core/tesseract-core-lstm.{js,wasm}
+public/tesseract/core/tesseract-core-simd-lstm.{js,wasm}
+public/tesseract/core/tesseract-core-relaxedsimd-lstm.{js,wasm}
+                                                        — from tesseract.js-core's dist/,
+                                                          LSTM-only variants only (see below)
+public/tesseract/lang-data/eng.traineddata.gz          — from tesseract-ocr/tessdata_fast
+                                                          on GitHub (Apache-2.0), gzipped
+                                                          locally (4.1MB → 2.0MB)
+```
+
+`createWorker("eng", 1, { workerPath, corePath, langPath, ... })` points at these with
+**root-absolute paths** (`/tesseract/worker.min.js`, not `./tesseract/worker.min.js`).
+The docs never clarify whether relative paths resolve against the page or against the
+worker's own URL (the worker script itself lives inside `/tesseract/`, so a relative
+`./core/` from there could double up to `/tesseract/tesseract/core/`) — rather than
+guess, root-absolute sidesteps the question entirely. Safe here because the site is
+deployed at the domain root, not a subpath; would need revisiting if that ever changes.
+
+**Only the LSTM-only core variants are shipped**, not the legacy-engine ones. `oem: 1`
+(the second `createWorker` argument) means LSTM-only recognition, and
+`legacyCore: false` (set explicitly, matches Tesseract's own default) tells it to only
+ever pick from the `-lstm` suffixed files. The plain/legacy variants
+(`tesseract-core.*`, `tesseract-core-simd.*`, `tesseract-core-relaxedsimd.*`) are never
+loaded and were deliberately not copied in — cut the vendored footprint roughly in
+half. All three `-lstm` variants (plain/SIMD/relaxed-SIMD) are shipped so Tesseract's
+own `wasm-feature-detect` can pick whichever this specific device supports.
+
+**Total footprint: ~11MB**, all lazy — nothing here is in the service worker's install-
+time `SHELL` precache, so it doesn't slow down or bloat the initial app install. It's
+fetched only the first time "Read the name off the label" is actually used, and the
+service worker's fetch handler now caches any successfully-fetched resource (not just
+the precached SHELL list — this was a real gap, fixed the same day), so it works
+offline from the second use onward. First use requires a connection.
+
+**Verification note (2026-08-06):** unlike the `TextDetector` claim above, this
+integration was actually build-tested before shipping — Node isn't installed on the
+dev machine normally, so a portable Node was fetched, `npm install` and the real
+`bash build.sh` were run for real, and the esbuild output was inspected for leftover
+Node-only references. Bundled cleanly, 202.9kb added to the main bundle. Not tested in
+an actual mobile browser yet — that's still on Steven to confirm.
+
+**`workerBlobURL: false`, `cacheMethod: "none"`.** The former makes Tesseract load the
+worker script directly via `new Worker(workerPath)` rather than fetching it and
+wrapping it in a `Blob` URL first (simpler, one fewer moving part, and blob-URL workers
+can hit CSP trouble in some setups). The latter disables Tesseract's own IndexedDB
+caching of downloaded assets (via `idb-keyval`) — the service worker cache above is
+the one and only caching layer; no need for two.
+
+**Every OCR call is timeout-guarded**, same lesson as the `TextDetector` hang below:
+`createWorker` gets 45s (first-time asset download can be slow), `recognize()` gets
+20s (should be fast once the model's loaded). The `ocrBusy` full-screen loader also
+shows live progress from Tesseract's `logger` callback and has a Cancel button as a
+second line of defense, so the user is never truly stuck regardless of what the
+timeout does or doesn't catch.
+
+**Not run automatically after a barcode scan.** Unlike the old (nonexistent, it turns
+out) `TextDetector` plan, Tesseract takes real seconds even when cached — running it
+on every single lock, including repeat scans of already-known parts that never use the
+name suggestion, would be wasted battery and CPU. It only runs on the explicit "Read
+the name off the label" action on the New Part screen.
+
+### TextDetector — why it's gone
+
+Same Shape Detection API family as `BarcodeDetector`. Was assumed to ship on
+Chrome/Android the same way `BarcodeDetector` does; confirmed 2026-08-06 that it does
+not (`"TextDetector" in window` is `false` on a real current Chrome/Android). It's also
+worth remembering **Shape Detection calls in general can hang rather than reject** on
+real Android hardware — confirmed separately for `BarcodeDetector`'s frame-capture path
+in the scanner, see `CLAUDE.md`. `try/catch` around an `await` does nothing for a call
+that never settles; only a real timeout guards against it.
 
 ## Artifact storage API (artifact-era, historical)
 

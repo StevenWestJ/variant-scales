@@ -1,4 +1,4 @@
-const VERSION = "pc-v10";
+const VERSION = "pc-v11";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -14,9 +14,6 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  // Never cache API calls - label reading needs the network and must fail honestly offline
-  if (url.hostname.endsWith("anthropic.com")) return;
   if (e.request.method !== "GET") return;
 
   e.respondWith(
@@ -28,7 +25,13 @@ self.addEventListener("fetch", (e) => {
         }).catch(() => {});
         return hit;
       }
-      return fetch(e.request).catch(() => caches.match("./index.html"));
+      // Not precached (e.g. the Tesseract OCR assets, loaded on demand the
+      // first time the label reader is used) - cache it too once fetched,
+      // so it's available offline from then on.
+      return fetch(e.request).then((res) => {
+        if (res && res.ok) caches.open(VERSION).then((c) => c.put(e.request, res.clone()));
+        return res;
+      }).catch(() => caches.match("./index.html"));
     })
   );
 });

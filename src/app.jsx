@@ -4,6 +4,7 @@ import {
   Download, Settings, AlertTriangle, Package, Search, RotateCcw,
   ClipboardList, Pencil, Boxes, Image as ImageIcon, Loader, Zap
 } from "lucide-react";
+import { createWorker } from "tesseract.js";
 
 /* ------------------------------------------------------------------ */
 /*  Storage                                                            */
@@ -12,7 +13,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v10";
+const BUILD = "pc-v11";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -260,25 +261,14 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
                 setCandidate(null);
                 try { vid.pause(); } catch (e) { /* freeze the frame if we can */ }
 
-                // Show Import immediately. Text detection is a bonus layered on
-                // after — it must never gate reaching the accept screen. On some
-                // Android builds TextDetector.detect() can hang rather than
-                // reject, which previously stalled the whole flow indefinitely.
+                // Show Import immediately - never gate reaching the accept
+                // screen on anything else. OCR (Tesseract, see readLabel) is
+                // deliberately not run automatically here: it takes real
+                // seconds, and most scans are repeat-scans of already-known
+                // parts where a name is never needed. It's a separate,
+                // explicit action ("Read the name off the label") on the
+                // New Part screen instead.
                 setPending({ value: v, frame, lines: [], name: "" });
-
-                if (cv && "TextDetector" in window) {
-                  new window.TextDetector().detect(cv)
-                    .then((blocks) => {
-                      const lines = blocks
-                        .map((b) => String(b.rawValue || "").trim())
-                        .filter((t) => t.length > 2 && t.length < 60 && t !== v)
-                        .filter((t, i, a) => a.indexOf(t) === i)
-                        .slice(0, 6);
-                      if (!lines.length) return;
-                      setPending((p) => (p && p.value === v ? { ...p, lines, name: p.name || lines[0] } : p));
-                    })
-                    .catch(() => { /* text detection is a bonus, never a blocker */ });
-                }
                 return;
               }
             } else {
@@ -443,6 +433,7 @@ export default function PartCounter() {
   const [result, setResult] = useState(null);
   const [importText, setImportText] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(null);
   const [labelLines, setLabelLines] = useState([]);
   const [nameOptions, setNameOptions] = useState([]);
   const fileRef = useRef(null);
@@ -548,27 +539,54 @@ export default function PartCounter() {
     flash(`Logged ${entry.count} × ${entry.name}`);
   };
 
-  // On-device text detection only. No key, no network, no cost. If the
-  // browser lacks TextDetector, the user types the name — never blocked.
+  // On-device OCR via a self-hosted Tesseract.js (worker/core/lang data all
+  // served from ./tesseract/, no CDN). Free, offline after first use, works
+  // in any browser - unlike the native TextDetector API this replaced, which
+  // turned out not to ship in stable Chrome at all. Never auto-saves; only
+  // ever prefills an editable field.
   const cancelOcr = () => {
     ocrCancelledRef.current = true;
     setOcrBusy(false);
+    setOcrProgress(null);
   };
 
   const readLabel = async (file) => {
     if (!file) return;
-    if (!("TextDetector" in window)) {
-      flash("This browser can't read text on-device. Scan the barcode or type the code.");
-      return;
-    }
     ocrCancelledRef.current = false;
     setOcrBusy(true);
+    setOcrProgress({ status: "starting up", pct: 0 });
+    let worker = null;
     try {
       const bmp = await createImageBitmap(file);
-      const blocks = await withTimeout(new window.TextDetector().detect(bmp), 8000);
+      worker = await withTimeout(
+        createWorker("eng", 1, {
+          // Root-absolute, not relative: the doc doesn't say whether these
+          // resolve against the page or against the worker's own URL, and
+          // getting it wrong would silently break OCR. A leading slash
+          // sidesteps the question - it always resolves to the origin
+          // regardless. Safe because this site is deployed at the domain
+          // root, not a subpath.
+          workerPath: "/tesseract/worker.min.js",
+          corePath: "/tesseract/core/",
+          langPath: "/tesseract/lang-data/",
+          legacyCore: false,
+          workerBlobURL: false,
+          gzip: true,
+          cacheMethod: "none",
+          logger: (m) => {
+            if (m && m.status && typeof m.progress === "number") {
+              setOcrProgress({ status: m.status, pct: Math.round(m.progress * 100) });
+            }
+          },
+        }),
+        45000
+      );
       if (ocrCancelledRef.current) return;
-      const lines = blocks
-        .map((b) => String(b.rawValue || "").trim())
+      const { data } = await withTimeout(worker.recognize(bmp), 20000);
+      if (ocrCancelledRef.current) return;
+      const lines = (data.text || "")
+        .split("\n")
+        .map((t) => t.trim())
         .filter((t) => t.length > 1 && t.length < 60)
         .filter((t, i, a) => a.indexOf(t) === i)
         .slice(0, 12);
@@ -585,7 +603,8 @@ export default function PartCounter() {
           : "Couldn't read that image. Try again, or type the code.");
       }
     } finally {
-      if (!ocrCancelledRef.current) setOcrBusy(false);
+      if (worker) worker.terminate().catch(() => {});
+      if (!ocrCancelledRef.current) { setOcrBusy(false); setOcrProgress(null); }
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -1250,9 +1269,19 @@ export default function PartCounter() {
       />
 
       {ocrBusy && (
-        <div className="fixed inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center gap-4">
+        <div className="fixed inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center gap-4 px-8">
           <Loader size={36} className="text-amber-400 animate-spin" />
-          <div className="text-sm text-slate-400 tracking-wide">Reading the label…</div>
+          <div className="text-sm text-slate-400 tracking-wide text-center">
+            {ocrProgress ? `${ocrProgress.status}…` : "Reading the label…"}
+          </div>
+          {ocrProgress && ocrProgress.pct > 0 && (
+            <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-400" style={{ width: `${ocrProgress.pct}%` }} />
+            </div>
+          )}
+          <div className="text-[10px] uppercase tracking-widest text-slate-600 text-center">
+            First time takes longer — downloading the reader
+          </div>
           <Btn onClick={cancelOcr} className="mt-2">Cancel</Btn>
         </div>
       )}

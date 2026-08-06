@@ -39,8 +39,9 @@ It runs on **one Android phone**, hosted on Netlify, installed as a PWA.
 3. **No paid services in the critical path.** Costs come out of his pocket, not the
    company's. On-device and free, or it doesn't ship. A build briefly called the
    Anthropic API with a user-supplied key for label reading — removed 2026-08-06.
-   Label reading is `TextDetector` only now; if it's unsupported, the user types the
-   name. Don't reintroduce a paid fallback here.
+   Label reading now runs on a self-hosted Tesseract.js (see API-NOTES) after the
+   native `TextDetector` API it was meant to use turned out not to actually exist on
+   real Chrome/Android. Don't reintroduce a paid fallback here.
 4. **Offline must work.** There are network dead zones on the factory floor. Counting,
    calibration, the log and CSV export are all local and must stay that way.
 
@@ -52,6 +53,7 @@ It runs on **one Android phone**, hosted on Netlify, installed as a PWA.
 | lucide-react | 0.383.0 | Icons |
 | Tailwind | 3.4.19 | Compiled here, so arbitrary values (`text-[11px]`) work |
 | esbuild | 0.28.1 | Bundler |
+| tesseract.js | 7.0.0 | On-device OCR for label reading. Self-hosted — see API-NOTES for the `public/tesseract/` asset layout, don't point it at a CDN |
 
 ## Build and deploy
 
@@ -82,9 +84,12 @@ a report that a fix "didn't work."
 **BarcodeDetector** — Chrome on Android only. Not Safari, not iOS, not Firefox. Fine
 here because the device is Android, but never assume it exists; feature-detect.
 
-**TextDetector** — same Shape Detection family, also Chrome/Android. Reads the printed
-text off the label for free, on-device, offline. Used to fill in part names. If missing,
-the chips just don't appear and the user types the name. Never make it required.
+**TextDetector — doesn't actually exist, don't use it.** Same Shape Detection family as
+`BarcodeDetector`, and this doc used to claim it shipped on Chrome/Android the same way.
+That was never verified on real hardware before being written down. Confirmed
+2026-08-06 on Steven's actual phone: `"TextDetector" in window` is `false`. It was
+apparently never promoted past experimental. Label reading uses a self-hosted
+Tesseract.js instead now (see API-NOTES) — works everywhere, not just Chrome/Android.
 
 **getUserMedia** — needs a secure context. Blocked in the Claude artifact frame and on
 `file://`. Only ever test on the real HTTPS URL. Hours were lost to this.
@@ -104,9 +109,10 @@ The detection loop:
    box, and any narrower than 18% of that box. Partial and distant reads were producing
    wrong codes.
 3. Requires the **same value three times running** before accepting.
-4. Then freezes the video, runs TextDetector over that frame, and shows a review panel
-   with the code and the detected text. **The user taps Import.** Nothing proceeds on
-   its own.
+4. Then freezes the video and shows a review panel with the code. **The user taps
+   Import.** Nothing proceeds on its own. (OCR on the frame was tried here
+   automatically at one point — removed; see API-NOTES on why it's a deliberate,
+   separate action instead.)
 
 The box is red when nothing is in view, amber when it can see a code but won't take it
 (with the reason), green while confirming, solid green on lock. Red as the resting state
@@ -122,20 +128,23 @@ silently. Fixed by declaring both above the `try`. Watch for this pattern genera
 a `try { const x = … }` followed by code outside the block that still expects `x` is
 invisible in review and silent at runtime.
 
-**2026-08-06 bug (fixed), the real blocker:** even after the fix above, the code still
-`await`ed `TextDetector.detect(cv)` *before* calling `setPending(...)` — so reaching
-the Import screen was gated on text detection completing. On real hardware,
-`TextDetector.detect()` can hang rather than resolve or reject (it proxies through
-Play Services on Android), which stalled the whole flow forever: locked box, code
-shown, "hold steady" — and no way forward. This is exactly the failure mode the
-non-negotiable above (TextDetector "never make it required") was written to prevent,
-and the code violated its own rule. Fixed by calling `setPending` immediately on lock
-and running text detection afterward as a fire-and-forget enhancement that patches
-`pending.lines` in if/when it resolves. **Rule going forward: nothing that reaches
-across a real device API (`TextDetector`, `BarcodeDetector`, `getUserMedia`, camera
-capabilities) may sit between lock-on and `setPending`/showing Import. Those calls can
-hang on real hardware in ways `try/catch` does not save you from — only a `catch`
-protects against rejection, not against never resolving.**
+**2026-08-06 bug (fixed), suspected but not the real blocker — corrected:** at the
+time, the code still `await`ed `TextDetector.detect(cv)` *before* calling
+`setPending(...)`, and this was diagnosed as the cause: text detection hanging and
+gating the whole flow. That diagnosis turned out to be wrong in a specific way — later
+the same day, testing confirmed `TextDetector` doesn't exist on Steven's phone at all
+(see the entry above), so that `await` was never actually reached; the `if (cv &&
+"TextDetector" in window)` guard skipped it every time. The *actual* remaining blocker
+was the CSS bug below, which the (non-existent) hang theory happened to also explain
+plausibly enough to seem confirmed. Recorded here as a caution about "confirmed on
+device" claims: re-verify what you think you tested, especially when a fix doesn't
+actually change the symptom. The code was still restructured to call `setPending`
+immediately on lock regardless, since **the underlying principle is still correct even
+though this specific hang wasn't real**: nothing that reaches across a real device API
+should sit between lock-on and showing Import. Shape Detection calls in general are
+reported to hang rather than reject on some Android/Chrome combinations — not
+confirmed firsthand here, but cheap to guard against regardless (see `withTimeout` in
+`src/app.jsx`).
 
 **2026-08-06 bug (fixed), stacked on top of the one above:** once the previous fix
 actually let `setPending` fire, the Import panel *still* never appeared on device — the

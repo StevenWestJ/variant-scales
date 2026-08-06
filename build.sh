@@ -14,6 +14,6 @@ npx tailwindcss -c tailwind.config.js -i src/input.css -o build/style.css --mini
 
 node inline.js
 
-cp public/* dist/
+cp -r public/* dist/
 echo "Built dist/ ($(du -h dist/index.html | cut -f1) index.html)"
 echo "REMEMBER: bump VERSION in public/sw.js or installed phones keep the old cache."

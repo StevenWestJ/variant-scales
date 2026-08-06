@@ -18,7 +18,8 @@ installed phones keep serving the old cached build.
 ## Files
 
 - `src/app.jsx` — the whole application
-- `public/` — service worker, manifest, icons
+- `public/` — service worker, manifest, icons, and `tesseract/` (self-hosted OCR
+  engine assets for label reading — see `API-NOTES-PartCounter.md`)
 - `build.sh` + `inline.js` — produce a single self-contained `dist/index.html`
 - `CLAUDE.md` — read this before making changes
 - `PRD-PartCounter.md` — requirements, decisions, open questions

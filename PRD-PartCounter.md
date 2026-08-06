@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.7 — built, awaiting shop-floor test
+**Status:** v0.8 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,15 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.8 (2026-08-06)** — Label reading now actually works: bundled a self-hosted
+  Tesseract.js (on-device OCR, ~11MB of assets vendored into `public/tesseract/`,
+  loaded on demand and cached offline after first use). Replaces `TextDetector`, which
+  turned out never to have existed on Steven's phone at all — confirmed on device, and
+  the earlier docs claiming otherwise were never actually verified. No CDN dependency,
+  no paid API, works in any browser. Build-tested end-to-end (portable Node + real
+  `esbuild`/`bash build.sh`) before shipping, not just assumed to work. Build bumped to
+  `pc-v11`.
 
 - **v0.7 (2026-08-06)** — Barcode scan → confirm → import confirmed working end to end
   on device. Pre-emptively guarded the standalone "Photograph the label" text-read path
