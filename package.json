@@ -1,0 +1,19 @@
+{
+  "name": "part-counter",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Weigh-to-count stocktake tool for small parts",
+  "scripts": {
+    "build": "bash build.sh",
+    "serve": "npx serve dist"
+  },
+  "dependencies": {
+    "lucide-react": "0.383.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "tailwindcss": "3.4.19"
+  }
+}
