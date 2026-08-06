@@ -12,7 +12,7 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v7";
+const BUILD = "pc-v8";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
@@ -248,23 +248,28 @@ function Scanner({ onCode, onClose, onPhoto, onBlocked }) {
                 if (navigator.vibrate) navigator.vibrate(60);
                 setStatus("locked");
                 stopRef.current = true;
+                setCandidate(null);
                 try { vid.pause(); } catch (e) { /* freeze the frame if we can */ }
 
-                // Free, on-device text read - no key, no network, no cost
-                let lines = [];
-                try {
-                  if (cv && "TextDetector" in window) {
-                    const td = new window.TextDetector();
-                    const blocks = await td.detect(cv);
-                    lines = blocks
-                      .map((b) => String(b.rawValue || "").trim())
-                      .filter((t) => t.length > 2 && t.length < 60 && t !== v)
-                      .filter((t, i, a) => a.indexOf(t) === i)
-                      .slice(0, 6);
-                  }
-                } catch (e) { /* text detection is a bonus, never a blocker */ }
+                // Show Import immediately. Text detection is a bonus layered on
+                // after — it must never gate reaching the accept screen. On some
+                // Android builds TextDetector.detect() can hang rather than
+                // reject, which previously stalled the whole flow indefinitely.
+                setPending({ value: v, frame, lines: [], name: "" });
 
-                setPending({ value: v, frame, lines, name: lines[0] || "" });
+                if (cv && "TextDetector" in window) {
+                  new window.TextDetector().detect(cv)
+                    .then((blocks) => {
+                      const lines = blocks
+                        .map((b) => String(b.rawValue || "").trim())
+                        .filter((t) => t.length > 2 && t.length < 60 && t !== v)
+                        .filter((t, i, a) => a.indexOf(t) === i)
+                        .slice(0, 6);
+                      if (!lines.length) return;
+                      setPending((p) => (p && p.value === v ? { ...p, lines, name: p.name || lines[0] } : p));
+                    })
+                    .catch(() => { /* text detection is a bonus, never a blocker */ });
+                }
                 return;
               }
             } else {

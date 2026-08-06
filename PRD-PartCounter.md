@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.4 — built, awaiting shop-floor test
+**Status:** v0.5 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -104,6 +104,12 @@ calibration sample.
 | Wrong box tare silently skews a count | Tare shown on the result screen before saving |
 
 ## 11. Changelog
+
+- **v0.5 (2026-08-06)** — Fixed the real cause of "scan locks but there's no way to
+  accept": the app awaited on-device text detection before showing Import, and that
+  detection can hang on real hardware. Import now appears the instant a code locks;
+  text detection fills in the name chips afterward if/when it finishes, never blocking.
+  Build bumped to `pc-v8`.
 
 - **v0.4 (2026-08-06)** — Removed the paid Anthropic API label-reading fallback; label
   reading is on-device `TextDetector` only now, or type it in. Fixed a scoping bug in

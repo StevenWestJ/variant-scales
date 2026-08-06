@@ -44,6 +44,13 @@ Same Shape Detection API family as `BarcodeDetector` — Chrome/Edge on Android,
 Safari/iOS, not Firefox. Same caveat as `BarcodeDetector` below: feature-detect, never
 assume.
 
+**It can hang, not just fail.** `detect()` proxies through Play Services on Android;
+confirmed on device (2026-08-06) that it can sit forever without resolving or
+rejecting. A `try/catch` around an `await` does nothing for a call that never settles.
+Never let it — or any other on-device Shape Detection call — sit between "code locked"
+and showing the user the accept/Import screen. Run it after, fire-and-forget, patching
+the result in if it ever comes back.
+
 ## Artifact storage API (artifact-era, historical)
 
 Superseded by plain `localStorage` under the key `stocktake-v1` once the app left the

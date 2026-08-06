@@ -114,14 +114,28 @@ is deliberate — it means nothing is being considered.
 
 Don't "simplify" any of this away. Each step is a bug that was reported from the floor.
 
-**2026-08-06 bug:** the capture-on-lock code declared `vid`/`cv` with `const` inside a
-`try` block, then referenced them again after the block closed — a `ReferenceError`,
-silently swallowed by the surrounding `catch`. Effect: the video never actually froze
-on lock, and on-device text detection never ran, both failing silently. The Import
-button itself still worked, so this looked like nothing was wrong until you noticed the
-frame wasn't frozen and no label chips ever appeared. Fixed by declaring both above the
-`try`. Watch for this pattern generally — a `try { const x = … }` followed by code
-outside the block that still expects `x` is invisible in review and silent at runtime.
+**2026-08-06 bug (fixed):** the capture-on-lock code declared `vid`/`cv` with `const`
+inside a `try` block, then referenced them again after the block closed — a
+`ReferenceError`, silently swallowed by the surrounding `catch`. Effect: the video
+never actually froze on lock, and on-device text detection never ran, both failing
+silently. Fixed by declaring both above the `try`. Watch for this pattern generally —
+a `try { const x = … }` followed by code outside the block that still expects `x` is
+invisible in review and silent at runtime.
+
+**2026-08-06 bug (fixed), the real blocker:** even after the fix above, the code still
+`await`ed `TextDetector.detect(cv)` *before* calling `setPending(...)` — so reaching
+the Import screen was gated on text detection completing. On real hardware,
+`TextDetector.detect()` can hang rather than resolve or reject (it proxies through
+Play Services on Android), which stalled the whole flow forever: locked box, code
+shown, "hold steady" — and no way forward. This is exactly the failure mode the
+non-negotiable above (TextDetector "never make it required") was written to prevent,
+and the code violated its own rule. Fixed by calling `setPending` immediately on lock
+and running text detection afterward as a fire-and-forget enhancement that patches
+`pending.lines` in if/when it resolves. **Rule going forward: nothing that reaches
+across a real device API (`TextDetector`, `BarcodeDetector`, `getUserMedia`, camera
+capabilities) may sit between lock-on and `setPending`/showing Import. Those calls can
+hang on real hardware in ways `try/catch` does not save you from — only a `catch`
+protects against rejection, not against never resolving.**
 
 ## Data
 
