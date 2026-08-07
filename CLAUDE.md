@@ -185,8 +185,15 @@ export after each session, and warn before anything destructive.
 
 ## State of play
 
-Working: scan → confirm → import, calibration, weigh-to-count with tare, the log, CSV
-export, paste-import of a part list, offline, installed as a PWA.
+Working: scan → confirm → import, label OCR (crop → pick lines), calibration,
+weigh-to-count, editing a part, the log, CSV export, paste-import of a part list,
+offline, installed as a PWA.
+
+**Tare is gone (v0.14).** Box/tote presets and the empty-box weight field were removed
+at Steven's request — he zeroes the scale with the box on it. `tareG` survives as a
+constant 0 in entries and in the CSV so old logs and any spreadsheet built on the
+export don't change shape. Don't reintroduce a tare UI without asking; if it comes
+back, the plumbing is still there.
 
 Open, in the PRD: whether anyone else counts in parallel, whether the export should carry
 the NAV system quantity for on-the-spot variance, and whether this parts library seeds

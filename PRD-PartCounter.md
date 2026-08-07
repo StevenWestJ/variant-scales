@@ -1,7 +1,7 @@
 # PRD — Weigh-to-Count Stocktake App
 
 **Owner:** Steven, Production Foreman, Variant (Building 1)
-**Status:** v0.13 — built, awaiting shop-floor test
+**Status:** v0.14 — built, awaiting shop-floor test
 **Last updated:** 2026-08-06
 
 ---
@@ -30,21 +30,23 @@ across Buildings 1–3, results merged.
 2. If the part is unknown → name it and assign a group.
 3. If the part has no calibration → count a sample by hand (default 100 pcs), weigh
    it in grams, enter both. App stores **g per piece**.
-4. Weigh the full box. Enter gross weight in g or kg.
-5. Subtract the empty box: scale-tared (0), a saved box preset, or a typed value.
-6. App shows the estimated count, plus a ± figure.
-7. Save to the stocktake log. Export the whole log as CSV.
+4. Zero the scale with the empty box on it, tip the parts in, enter the weight in g
+   or kg.
+5. App shows the estimated count, plus a ± figure.
+6. Save to the stocktake log. Export the whole log as CSV.
 
 ## 5. Maths
 
 ```
 gPerPiece = sampleWeightG / sampleCount
-netG      = grossG − tareG
 count     = round(netG / gPerPiece)
 
-relativeError ≈ (scaleResolution / sampleWeightG)      // calibration error
-              + (scaleResolution × tareReadings) / netG // weighing error
+relativeError ≈ (scaleResolution / sampleWeightG)   // calibration error
+              + scaleResolution / netG              // weighing error
 ```
+
+(Tare was removed in v0.14 — the scale is zeroed with the box on it, so the weight
+entered *is* the net weight, and there's one weighing rather than two.)
 
 The ± figure is flagged green under 10%, amber over. Over 10% the fix is a bigger
 calibration sample.
@@ -56,7 +58,7 @@ calibration sample.
 | Storage | On-device, single JSON key | No backend needed for a stocktake |
 | Calibration sample | Variable, default 100 | Light parts need bigger samples |
 | Filter depth | One level (group) | Explicitly requested |
-| Tare handling | Three ways: tared scale / preset / typed | Boxes vary; scale tare isn't always usable |
+| ~~Tare handling~~ | **Dropped 2026-08-07** | Box presets ("totes") and typed box weights were removed at Steven's request — not relevant to how he actually works. Zero the scale with the empty box on it instead. `tareG` stays in the data model and CSV as 0 so old logs and any spreadsheet built on the export still read |
 | Units | g and kg on input, grams internally | Scales differ; avoid unit-conversion errors |
 | Unknown codes | Create the part inline | Never block a count |
 | Export | CSV | Feeds Dynamics NAV or Excel reconciliation |
@@ -106,9 +108,19 @@ calibration sample.
 | Camera/barcode API unavailable on the phone | Manual entry and browse always available |
 | Very light parts (small washers) exceed 10% error | ± warning prompts a larger sample |
 | Data loss if browser storage is cleared | Export CSV after each work session |
-| Wrong box tare silently skews a count | Tare shown on the result screen before saving |
+| Scale not zeroed with the box on it — the box weight lands in the count | Weight is shown on the result screen before saving. Tare handling was removed in v0.14, so this is now a procedure question rather than something the app can catch |
 
 ## 11. Changelog
+
+- **v0.14 (2026-08-07)** — OCR reported at ~90% accurate on the floor; good enough for
+  now, `tessdata_best` left on the shelf. Removed tare entirely at Steven's request:
+  no more box/tote presets in Setup and no empty-box weight on the weigh screen — you
+  zero the scale with the empty box on it. `tareG` is kept as 0 in the data model and
+  CSV so existing logs and exports don't change shape. **Parts can now be edited** —
+  the pencil in the Parts tab opens a proper edit screen for name and group instead of
+  jumping straight to recalibration, and if a rename affects entries already in the
+  log it offers to correct those too. Deleting a part now asks first. Build bumped to
+  `pc-v17`.
 
 - **v0.13 (2026-08-07)** — Two bugs found in real use of the label reader. **Reading a
   label overwrote the scanned part number**: the pick screen routed the chosen line

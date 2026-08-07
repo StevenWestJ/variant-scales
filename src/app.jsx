@@ -13,14 +13,14 @@ const KEY = "stocktake-v1";
 
 // Bump on every change, together with VERSION in public/sw.js.
 // Shown in Setup so it's obvious which build a phone is running.
-const BUILD = "pc-v16";
+const BUILD = "pc-v17";
 
 const DEFAULT_DATA = {
   parts: {},          // code -> { code, name, category, gPerPiece, sampleCount, sampleWeightG, calibratedAt }
+  // grossG/tareG/netG kept in entries so old logs and the CSV columns stay
+  // readable, but tare was dropped from the UI (2026-08-07) - tareG is 0 and
+  // netG === grossG for anything counted since.
   entries: [],        // { id, code, name, category, grossG, tareG, netG, gPerPiece, count, note, ts }
-  containers: [       // tare presets
-    { id: "c1", name: "Blue tote", g: 0 },
-  ],
   categories: ["Bolts", "Nuts", "Washers", "Screws", "Rivets", "Split pins", "Clips", "Springs", "Other"],
   settings: { resolutionG: 0.1, location: "Building 1" },
 };
@@ -610,8 +610,9 @@ export default function PartCounter() {
   const [catFilter, setCatFilter] = useState(null);
   const [search, setSearch] = useState("");
   const [newPart, setNewPart] = useState({ name: "", category: "Bolts" });
+  const [editPart, setEditPart] = useState({ name: "", category: "" });
   const [cal, setCal] = useState({ pieces: "100", weight: "", unit: "g" });
-  const [weigh, setWeigh] = useState({ gross: "", unit: "kg", tareId: "", tareManual: "", note: "" });
+  const [weigh, setWeigh] = useState({ gross: "", unit: "kg", note: "" });
   const [result, setResult] = useState(null);
   const [importText, setImportText] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
@@ -654,7 +655,7 @@ export default function PartCounter() {
     setScanning(false);
     setCodeInput("");
     if (data.parts[c]) {
-      if (data.parts[c].gPerPiece) { setWeigh({ gross: "", unit: "kg", tareId: "", tareManual: "", note: "" }); setView("weigh"); }
+      if (data.parts[c].gPerPiece) { setWeigh({ gross: "", unit: "kg", note: "" }); setView("weigh"); }
       else { setCal({ pieces: "100", weight: "", unit: "g" }); setView("calibrate"); }
     } else {
       setNewPart({ name: scannedName || "", category: data.categories[0] });
@@ -676,6 +677,40 @@ export default function PartCounter() {
     setView("calibrate");
   };
 
+  const savePartEdit = () => {
+    const existing = data.parts[activeCode];
+    if (!existing) { setView("home"); return; }
+    const name = editPart.name.trim();
+    if (!name) { flash("Give the part a name."); return; }
+
+    // Log entries store the name as it was at the time of counting. If the
+    // name is being corrected (OCR typo, say) those entries are almost
+    // certainly meant to be corrected too - but that rewrites recorded data,
+    // so ask rather than assume.
+    const affected = existing.name !== name
+      ? data.entries.filter((e) => e.code === activeCode).length
+      : 0;
+    let entries = data.entries;
+    if (affected > 0 && confirm(
+      `${affected} ${affected === 1 ? "entry" : "entries"} in the log ${affected === 1 ? "was" : "were"} counted as "${existing.name}".\n\nUpdate ${affected === 1 ? "it" : "them"} to "${name}" as well?`
+    )) {
+      entries = data.entries.map((e) => (e.code === activeCode ? { ...e, name } : e));
+    }
+
+    save({
+      ...data,
+      entries,
+      parts: {
+        ...data.parts,
+        [activeCode]: { ...existing, name, category: editPart.category || existing.category },
+      },
+    });
+    setActiveCode(null);
+    setTab("parts");
+    setView("home");
+    flash("Part updated");
+  };
+
   const saveCalibration = () => {
     const pieces = parseInt(cal.pieces, 10);
     const wG = toGrams(cal.weight, cal.unit);
@@ -694,22 +729,19 @@ export default function PartCounter() {
       },
     };
     save(next);
-    setWeigh({ gross: "", unit: "kg", tareId: "", tareManual: "", note: "" });
+    setWeigh({ gross: "", unit: "kg", note: "" });
     setView("weigh");
     flash(`Calibrated: ${(wG / pieces).toFixed(3)} g per piece`);
   };
 
   const computeCount = () => {
-    const grossG = toGrams(weigh.gross, weigh.unit);
-    const container = data.containers.find((c) => c.id === weigh.tareId);
-    const tareG = weigh.tareManual !== "" ? toGrams(weigh.tareManual, "g") : (container ? container.g : 0);
-    if (!isFinite(grossG) || grossG <= 0) { flash("Enter the weight of the full box."); return; }
-    const netG = grossG - (isFinite(tareG) ? tareG : 0);
-    if (netG <= 0) { flash("Net weight is zero or less. Check the box weight."); return; }
+    const netG = toGrams(weigh.gross, weigh.unit);
+    if (!isFinite(netG) || netG <= 0) { flash("Enter the weight of the parts."); return; }
     const gpp = part.gPerPiece;
     const count = Math.round(netG / gpp);
-    const acc = accuracy(count, netG, gpp, part.sampleWeightG, data.settings.resolutionG, tareG > 0);
-    setResult({ grossG, tareG: isFinite(tareG) ? tareG : 0, netG, gPerPiece: gpp, count, acc });
+    // No tare: one weighing, so one scale-resolution's worth of error.
+    const acc = accuracy(count, netG, gpp, part.sampleWeightG, data.settings.resolutionG, false);
+    setResult({ grossG: netG, tareG: 0, netG, gPerPiece: gpp, count, acc });
     setView("result");
   };
 
@@ -1192,6 +1224,69 @@ export default function PartCounter() {
       );
     }
 
+    if (view === "editpart" && part) {
+      const n = editPart.name.trim().toLowerCase();
+      const dupName = n ? parts.find((p) => p.name.toLowerCase() === n && p.code !== activeCode) : null;
+      return (
+        <>
+          <Header title="Edit part" back={() => { setActiveCode(null); setTab("parts"); setView("home"); }} />
+          <div className="p-4 space-y-5">
+            <Panel className="p-4">
+              <Label>Part number</Label>
+              <div className="font-mono text-xl text-amber-300 break-all">{part.code}</div>
+              <p className="text-xs text-slate-500 mt-2">
+                The number can't be changed — it's what the barcode scans to. Delete the part
+                and re-add it if the number itself is wrong.
+              </p>
+            </Panel>
+
+            <div>
+              <Label>Name</Label>
+              <TextInput value={editPart.name} onChange={(v) => setEditPart({ ...editPart, name: v })} placeholder="e.g. M8×30 flange bolt" />
+              {dupName && (
+                <div className="flex gap-2 mt-2 text-amber-400 text-xs leading-relaxed">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>You already have that name under code {dupName.code}. Same part with two codes counts twice.</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <Label>Group</Label>
+              <div className="flex flex-wrap gap-2">
+                {data.categories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setEditPart({ ...editPart, category: c })}
+                    className={`px-4 py-2 rounded-full text-sm border ${editPart.category === c ? "bg-amber-400 text-slate-950 border-amber-400" : "border-slate-700 text-slate-300"}`}
+                  >{c}</button>
+                ))}
+              </div>
+            </div>
+
+            <Panel className="p-4">
+              <Label>Calibration</Label>
+              <div className="font-mono text-slate-200">
+                {part.gPerPiece
+                  ? `${part.gPerPiece.toFixed(4)} g/pc · from ${part.sampleCount} pcs`
+                  : "Not calibrated yet"}
+              </div>
+            </Panel>
+
+            <Btn variant="primary" onClick={savePartEdit} className="w-full">
+              <Check size={18} /> Save changes
+            </Btn>
+            <Btn
+              onClick={() => { setCal({ pieces: String(part.sampleCount || 100), weight: "", unit: "g" }); setView("calibrate"); }}
+              className="w-full"
+            >
+              <RotateCcw size={18} /> Recalibrate
+            </Btn>
+          </div>
+        </>
+      );
+    }
+
     if (view === "calibrate" && part) {
       const pieces = parseInt(cal.pieces, 10);
       const wG = toGrams(cal.weight, cal.unit);
@@ -1271,7 +1366,7 @@ export default function PartCounter() {
             </div>
 
             <div>
-              <Label>Total weight on the scale</Label>
+              <Label>Weight of the parts</Label>
               <NumInput value={weigh.gross} onChange={(v) => setWeigh({ ...weigh, gross: v })} placeholder="0.00" suffix={weigh.unit} autoFocus />
               <div className="flex gap-2 mt-2">
                 {["g", "kg"].map((u) => (
@@ -1279,23 +1374,9 @@ export default function PartCounter() {
                     className={`flex-1 py-3 rounded border text-sm ${weigh.unit === u ? "bg-slate-700 border-amber-400 text-amber-300" : "border-slate-700 text-slate-400"}`}>{u}</button>
                 ))}
               </div>
-            </div>
-
-            <div>
-              <Label>Empty box weight</Label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                <button onClick={() => setWeigh({ ...weigh, tareId: "", tareManual: "" })}
-                  className={`px-4 py-2 rounded-full text-sm border ${!weigh.tareId && !weigh.tareManual ? "bg-amber-400 text-slate-950 border-amber-400" : "border-slate-700 text-slate-300"}`}>
-                  Scale was tared
-                </button>
-                {data.containers.filter((c) => c.g > 0).map((c) => (
-                  <button key={c.id} onClick={() => setWeigh({ ...weigh, tareId: c.id, tareManual: "" })}
-                    className={`px-4 py-2 rounded-full text-sm border ${weigh.tareId === c.id ? "bg-amber-400 text-slate-950 border-amber-400" : "border-slate-700 text-slate-300"}`}>
-                    {c.name} · {c.g}g
-                  </button>
-                ))}
-              </div>
-              <NumInput value={weigh.tareManual} onChange={(v) => setWeigh({ ...weigh, tareManual: v, tareId: "" })} placeholder="or type box weight" suffix="g" />
+              <p className="text-xs text-slate-500 mt-2">
+                Zero the scale with the empty box on it, then tip the parts in.
+              </p>
             </div>
 
             <div>
@@ -1335,9 +1416,7 @@ export default function PartCounter() {
 
             <Panel className="p-4 space-y-3 font-mono text-sm">
               {[
-                ["On the scale", `${fmt(result.grossG)} g`],
-                ["Empty box", `− ${fmt(result.tareG)} g`],
-                ["Parts only", `${fmt(result.netG)} g`],
+                ["Weight", `${fmt(result.netG)} g`],
                 ["Piece weight", `${result.gPerPiece.toFixed(4)} g`],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between">
@@ -1380,9 +1459,10 @@ export default function PartCounter() {
                 </div>
               </div>
               <div className="flex gap-1 shrink-0">
-                <button onClick={() => { setActiveCode(p.code); setCal({ pieces: String(p.sampleCount || 100), weight: "", unit: "g" }); setTab("count"); setView("calibrate"); }}
+                <button onClick={() => { setActiveCode(p.code); setEditPart({ name: p.name, category: p.category }); setTab("count"); setView("editpart"); }}
                   className="p-3 text-slate-400 active:text-amber-300"><Pencil size={18} /></button>
                 <button onClick={() => {
+                  if (!confirm(`Delete "${p.name}"?\n\nIts calibration goes too — you'd have to count and weigh a sample again. Entries already in the log are kept.`)) return;
                   const parts2 = { ...data.parts }; delete parts2[p.code];
                   save({ ...data, parts: parts2 });
                 }} className="p-3 text-slate-500 active:text-rose-400"><Trash2 size={18} /></button>
@@ -1447,26 +1527,6 @@ export default function PartCounter() {
             ))}
           </div>
           <p className="text-xs text-slate-500 mt-2">The smallest step your scale shows. Used for the ± figure.</p>
-        </div>
-
-        <div>
-          <Label>Boxes and totes</Label>
-          <div className="space-y-2">
-            {data.containers.map((c) => (
-              <div key={c.id} className="flex gap-2">
-                <input value={c.name}
-                  onChange={(e) => save({ ...data, containers: data.containers.map((x) => x.id === c.id ? { ...x, name: e.target.value } : x) })}
-                  className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-slate-100 focus:outline-none focus:border-amber-400" />
-                <input value={c.g} inputMode="decimal"
-                  onChange={(e) => save({ ...data, containers: data.containers.map((x) => x.id === c.id ? { ...x, g: parseFloat(e.target.value) || 0 } : x) })}
-                  className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 font-mono text-amber-300 focus:outline-none focus:border-amber-400" />
-                <button onClick={() => save({ ...data, containers: data.containers.filter((x) => x.id !== c.id) })}
-                  className="px-3 text-slate-500"><Trash2 size={18} /></button>
-              </div>
-            ))}
-          </div>
-          <Btn onClick={() => save({ ...data, containers: [...data.containers, { id: uid(), name: "New box", g: 0 }] })}
-            className="w-full mt-2"><Plus size={18} /> Add a box</Btn>
         </div>
 
         <div>
